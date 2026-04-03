@@ -22,19 +22,19 @@ th1 = q(2);
 th2 = q(3);
 
 M = [p.m_total,           p.A*cos(th1),               p.B*cos(th2);
-     p.A*cos(th1),        p.I_link1,                  p.Cc*cos(th1-th2);
-     p.B*cos(th2),        p.Cc*cos(th1-th2),          p.I_link2];
+    p.A*cos(th1),        p.I_link1,                  p.Cc*cos(th1-th2);
+    p.B*cos(th2),        p.Cc*cos(th1-th2),          p.I_link2];
 
 % dM/dx = zeros(3)
 dM1 = zeros(3,3);
 
 dM2 = [0,                 -p.A*sin(th1),              0;
-      -p.A*sin(th1),      0,                          -p.Cc*sin(th1-th2);
-       0,                 -p.Cc*sin(th1-th2),         0];
+    -p.A*sin(th1),      0,                          -p.Cc*sin(th1-th2);
+    0,                 -p.Cc*sin(th1-th2),         0];
 
 dM3 = [0,                 0,                          -p.B*sin(th2);
-       0,                 0,                           p.Cc*sin(th1-th2);
-      -p.B*sin(th2),       p.Cc*sin(th1-th2),          0];
+    0,                 0,                           p.Cc*sin(th1-th2);
+    -p.B*sin(th2),       p.Cc*sin(th1-th2),          0];
 
 dM = cat(3, dM1, dM2, dM3);
 
