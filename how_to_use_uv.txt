@@ -1,0 +1,39 @@
+uv 설치
+
+mac or linux
+curl -LsSf https://astral.sh/uv/install.sh | sh
+windows
+powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
+
+pip install uv
+or
+brew install uv
+
+-----------------------------------------------
+uv 사용법
+가상환경을 실행시키고싶은 디렉토리에서 터미널 실행
+
+초기 설정
+uv init
+파일 4개 생긴다
+.python-version
+main.pythonpyproject.toml
+README.md
+
+만약 라이브러르를 추가하고 싶다면?(if numpy)
+uv add numpy
+특정버전의 python을 실행시키거나 이상을 실행시키고 싶으면?
+pyproject.toml수정
+3.13버전 이상을 사용하고 싶을때
+requires-python = ">=3.13"
+3.13만 사용하고 싶을때
+requires-python = "==3.13"
+---------------------------------------------------
+동기화
+uv sync
+
+가상환경에서 실행(if python3)
+uv run python3
+-------------------------------------------------
+
+.venv   폴더 필요없음
