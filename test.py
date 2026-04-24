@@ -19,6 +19,17 @@ params = {
     "theta1": 0.1,
     "theta2": -0.1,
     "threshold": 0.2,
+    # Realistic actuator/controller limits (rough NEMA17-driven axis model).
+    "u_max": 12.0,
+    "u_quant": 0.2,
+    "control_dt": 0.01,
+    # Viscous damping coefficients.
+    "cart_damping": 0.8,
+    "joint1_damping": 0.05,
+    "joint2_damping": 0.04,
+    # External disturbance force (N): amp * sin(2*pi*freq*t)
+    "dist_amp": 0.8,
+    "dist_freq": 1.8,
 }
 
 # LQR 비용 행렬
@@ -70,10 +81,70 @@ def compute_matrices(p):
 def compute_solution(p):
     A, B, K = compute_matrices(p)
 
+    def quantize(value, resolution):
+        if resolution <= 0:
+            return value
+        return resolution * np.round(value / resolution)
+
+    def nonlinear_state_derivative(t, X, u):
+        x, theta1, theta2, x_dot, theta1_dot, theta2_dot = X
+        M = p["M"]
+        m1 = p["m1"]
+        m2 = p["m2"]
+        L1 = p["L1"]
+        L2 = p["L2"]
+        g = p["g"]
+
+        c1 = np.cos(theta1)
+        c2 = np.cos(theta2)
+        c12 = np.cos(theta1 - theta2)
+        s1 = np.sin(theta1)
+        s2 = np.sin(theta2)
+        s12 = np.sin(theta1 - theta2)
+
+        Mq = np.array([
+            [M + m1 + m2, (0.5 * m1 + m2) * L1 * c1, 0.5 * m2 * L2 * c2],
+            [(0.5 * m1 + m2) * L1 * c1, (1.0 / 3.0 * m1 + m2) * L1**2, 0.5 * m2 * L1 * L2 * c12],
+            [0.5 * m2 * L2 * c2, 0.5 * m2 * L1 * L2 * c12, 1.0 / 3.0 * m2 * L2**2],
+        ])
+
+        nonlinear_terms = np.array([
+            -(0.5 * m1 + m2) * L1 * s1 * theta1_dot**2 - 0.5 * m2 * L2 * s2 * theta2_dot**2,
+            -0.5 * m2 * L1 * L2 * s12 * theta2_dot**2,
+            0.5 * m2 * L1 * L2 * s12 * theta1_dot**2,
+        ])
+
+        gravity_terms = np.array([
+            0.0,
+            (0.5 * m1 + m2) * g * L1 * s1,
+            0.5 * m2 * g * L2 * s2,
+        ])
+
+        damping_terms = np.array([
+            p["cart_damping"] * x_dot,
+            p["joint1_damping"] * theta1_dot,
+            p["joint2_damping"] * theta2_dot,
+        ])
+
+        disturbance = p["dist_amp"] * np.sin(2.0 * np.pi * p["dist_freq"] * t)
+        tau = np.array([u + disturbance, 0.0, 0.0])
+
+        q_ddot = la.solve(Mq, tau - nonlinear_terms - damping_terms + gravity_terms)
+        return np.array([x_dot, theta1_dot, theta2_dot, q_ddot[0], q_ddot[1], q_ddot[2]])
+
+    controller = {
+        "next_t": 0.0,
+        "u_hold": 0.0,
+    }
+
     def closed_loop_dynamics(t, X):
-        u = -K @ X
-        u = u[0]
-        return A @ X + B.flatten() * u
+        if t + 1e-12 >= controller["next_t"]:
+            u_cmd = float((-K @ X)[0])
+            u_cmd = float(np.clip(u_cmd, -p["u_max"], p["u_max"]))
+            controller["u_hold"] = float(quantize(u_cmd, p["u_quant"]))
+            controller["next_t"] += p["control_dt"]
+
+        return nonlinear_state_derivative(t, X, controller["u_hold"])
 
     X0 = np.array([p["x0"], p["theta1"], p["theta2"], 0.0, 0.0, 0.0])
     sol = solve_ivp(closed_loop_dynamics, t_span, X0, t_eval=t_eval, max_step=0.02)
@@ -179,6 +250,14 @@ def reset_text(text):
             "theta1": 0.1,
             "theta2": -0.1,
             "threshold": 0.2,
+            "u_max": 12.0,
+            "u_quant": 0.2,
+            "control_dt": 0.01,
+            "cart_damping": 0.8,
+            "joint1_damping": 0.05,
+            "joint2_damping": 0.04,
+            "dist_amp": 0.8,
+            "dist_freq": 1.8,
         }
         for key, val in defaults.items():
             if key in sliders:
