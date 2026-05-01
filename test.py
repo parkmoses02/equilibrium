@@ -30,6 +30,9 @@ params = {
     # External disturbance force (N): amp * sin(2*pi*freq*t)
     "dist_amp": 0.8,
     "dist_freq": 1.8,
+    # Rail range (cart movement limit)
+    "rail_x_min": -1.2,
+    "rail_x_max": 1.2,
 }
 
 # LQR 비용 행렬
@@ -168,6 +171,14 @@ ax.set_title("Double Inverted Pendulum LQR Control")
 cart_width = 0.2
 cart_height = 0.1
 
+# Draw rail limits (vertical lines)
+rail_left = ax.axvline(x=params["rail_x_min"], color='gray', linestyle='--', linewidth=2, label='Rail limits')
+rail_right = ax.axvline(x=params["rail_x_max"], color='gray', linestyle='--', linewidth=2)
+
+# Draw rail surface
+rail_surface = ax.plot([params["rail_x_min"], params["rail_x_max"]], [-cart_height / 2, -cart_height / 2], 
+                       'k-', linewidth=3, label='Rail')[0]
+
 cart_rect = plt.Rectangle((-cart_width / 2, -cart_height / 2), cart_width, cart_height, fc='blue')
 ax.add_patch(cart_rect)
 line1, = ax.plot([], [], 'o-', lw=3, markersize=8, color='red')
@@ -184,6 +195,8 @@ slider_axes = {
     "theta1": plt.axes([0.60, 0.24, 0.30, 0.03], facecolor='lightgoldenrodyellow'),
     "theta2": plt.axes([0.60, 0.20, 0.30, 0.03], facecolor='lightgoldenrodyellow'),
     "threshold": plt.axes([0.60, 0.16, 0.30, 0.03], facecolor='lightgoldenrodyellow'),
+    "rail_x_min": plt.axes([0.60, 0.12, 0.30, 0.03], facecolor='lightcyan'),
+    "rail_x_max": plt.axes([0.60, 0.08, 0.30, 0.03], facecolor='lightcyan'),
 }
 
 sliders = {
@@ -196,6 +209,8 @@ sliders = {
     "theta1": Slider(slider_axes["theta1"], 'theta1', -1.5, 1.5, valinit=params["theta1"]),
     "theta2": Slider(slider_axes["theta2"], 'theta2', -1.5, 1.5, valinit=params["theta2"]),
     "threshold": Slider(slider_axes["threshold"], 'threshold', 0.05, 0.5, valinit=params["threshold"]),
+    "rail_x_min": Slider(slider_axes["rail_x_min"], 'rail_min', -1.5, 0.0, valinit=params["rail_x_min"]),
+    "rail_x_max": Slider(slider_axes["rail_x_max"], 'rail_max', 0.0, 1.5, valinit=params["rail_x_max"]),
 }
 
 # 텍스트 박스 영역
@@ -230,6 +245,13 @@ def recompute(_=None):
         params[key] = slider.val
 
     sol, K = compute_solution(params)
+    
+    # Update rail limits visualization
+    rail_left.set_xdata([params["rail_x_min"], params["rail_x_min"]])
+    rail_right.set_xdata([params["rail_x_max"], params["rail_x_max"]])
+    rail_surface.set_data([params["rail_x_min"], params["rail_x_max"]], 
+                          [-cart_height / 2, -cart_height / 2])
+    
     ax.set_title(
         f"Double Inverted Pendulum LQR Control  |  x0={params['x0']:.2f}  theta1={params['theta1']:.2f}  theta2={params['theta2']:.2f}"
     )
@@ -258,6 +280,8 @@ def reset_text(text):
             "joint2_damping": 0.04,
             "dist_amp": 0.8,
             "dist_freq": 1.8,
+            "rail_x_min": -1.2,
+            "rail_x_max": 1.2,
         }
         for key, val in defaults.items():
             if key in sliders:
@@ -283,6 +307,9 @@ def update(frame):
     x = sol.y[0, frame]
     theta1 = sol.y[1, frame]
     theta2 = sol.y[2, frame]
+    
+    # Clamp cart position within rail limits
+    x = np.clip(x, params["rail_x_min"] + cart_width / 2, params["rail_x_max"] - cart_width / 2)
 
     cart_rect.set_xy((x - cart_width / 2, -cart_height / 2))
 
@@ -294,7 +321,7 @@ def update(frame):
     line1.set_data([x, x1], [0, y1])
     line2.set_data([x1, x2], [y1, y2])
     frame_text.set_text(
-        f"frame={frame}  θ1={theta1:.2f}  θ2={theta2:.2f}  x={x:.2f}"
+        f"frame={frame}  θ1={theta1:.2f}  θ2={theta2:.2f}  x={x:.2f}  (range: {params['rail_x_min']:.2f}~{params['rail_x_max']:.2f})"
     )
 
     return cart_rect, line1, line2, frame_text
