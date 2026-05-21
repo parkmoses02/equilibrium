@@ -15,42 +15,37 @@ If you already have the repository, fetch the latest branch changes and switch t
 
 ## 2) Python setup
 
-Create a virtual environment in the repository root.
+This project uses `uv` for package and environment management. 
 
-```bash
-python -m venv .venv
-```
-
-Activate it:
-
-Windows PowerShell:
-
-```powershell
-.\.venv\Scripts\Activate.ps1
-```
-
-Windows Command Prompt:
-
-```bat
-.\.venv\Scripts\activate.bat
-```
+First, install `uv` if you haven't already:
 
 macOS / Linux:
-
 ```bash
-source .venv/bin/activate
+curl -LsSf https://astral.sh/uv/install.sh | sh
 ```
 
-Install dependencies:
+Windows:
+```powershell
+powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
+```
 
+Or via package managers:
 ```bash
-pip install -r requirements.txt
+brew install uv      # macOS
+pip install uv       # Alternative
+```
+
+Create the virtual environment and install all dependencies automatically:
+```bash
+uv sync
 ```
 
 ## 3) Run the Python template
 
+Run the script within the managed virtual environment using `uv run`:
+
 ```bash
-python dynamics_template.py
+uv run python dynamics_template.py
 ```
 
 The script prints:
