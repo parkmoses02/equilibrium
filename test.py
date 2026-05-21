@@ -5,6 +5,9 @@ import matplotlib.pyplot as plt
 import matplotlib.animation as animation
 from matplotlib.widgets import Slider, Button, TextBox
 
+from dynamics_template import Params, state_space_linearized, state_derivative
+from lqr_controller import LQRController
+
 # ==========================================
 # 1. 시스템 파라미터 (임의의 초기값 설정)
 # ==========================================
@@ -16,9 +19,9 @@ params = {
     "L2": 0.15,
     "g": 9.81,
     "x0": 0.0,
-    "theta1": 0.1,
-    "theta2": -0.1,
-    "threshold": 0.2,
+    "theta1": 0.0,
+    "theta2": -0.0,
+    "threshold": 0.05,
     # Realistic actuator/controller limits (rough NEMA17-driven axis model).
     "u_max": 12.0,
     "u_quant": 0.2,
@@ -42,112 +45,90 @@ t_eval = np.linspace(t_span[0], t_span[1], 500)
 # ==========================================
 # 2. 행렬/해 결산 함수
 # ==========================================
+def get_dynamics_params(p):
+    return Params(
+        m_total=p["M"] + p["m1"] + p["m2"],
+        A=(0.5 * p["m1"] + p["m2"]) * p["L1"],
+        B=0.5 * p["m2"] * p["L2"],
+        Cc=0.5 * p["m2"] * p["L1"] * p["L2"],
+        I_link1=(1.0 / 3.0 * p["m1"] + p["m2"]) * p["L1"]**2,
+        I_link2=1.0 / 3.0 * p["m2"] * p["L2"]**2,
+        k1=(0.5 * p["m1"] + p["m2"]) * p["g"] * p["L1"],
+        k2=0.5 * p["m2"] * p["g"] * p["L2"]
+    )
+
+
 def compute_matrices(p):
-    M = p["M"]
-    m1 = p["m1"]
-    m2 = p["m2"]
-    L1 = p["L1"]
-    L2 = p["L2"]
-    g = p["g"]
-
-    M0 = np.array([
-        [M + m1 + m2, (0.5 * m1 + m2) * L1, 0.5 * m2 * L2],
-        [(0.5 * m1 + m2) * L1, (1 / 3 * m1 + m2) * L1**2, 0.5 * m2 * L1 * L2],
-        [0.5 * m2 * L2, 0.5 * m2 * L1 * L2, 1 / 3 * m2 * L2**2],
-    ])
-
-    K_mat = np.array([
-        [0, 0, 0],
-        [0, -(0.5 * m1 + m2) * g * L1, 0],
-        [0, 0, -0.5 * m2 * g * L2],
-    ])
-
-    Minv = la.inv(M0)
-    A21 = -Minv @ K_mat
-
-    A = np.zeros((6, 6))
-    A[0:3, 3:6] = np.eye(3)
-    A[3:6, 0:3] = A21
-
-    B = np.zeros((6, 1))
-    B[3:6, 0] = Minv[:, 0]
-
-    P = la.solve_continuous_are(A, B, Q, R)
-    K = la.inv(R) @ B.T @ P
-
-    return A, B, K
+    dp = get_dynamics_params(p)
+    A, B = state_space_linearized(dp)
+    
+    # dynamics_template.py의 state_space_linearized는 매달린 진자(downright) 기준으로
+    # A21 = -M_inv @ K를 구하지만, 역진자(upright)로 안정화하려면 부호가 반대(+M_inv @ K)가
+    # 되어야 하므로 해당 부분의 부호를 반전시킵니다.
+    A[3:6, 0:3] = -A[3:6, 0:3]
+    
+    # B는 3자유도 입력 [F_cart, tau_1, tau_2]^T 이므로 카트에만 힘이 들어가는 첫 번째 열(index 0) 추출
+    B_cart = B[:, [0]]
+    
+    # LQRController를 활용하여 최적 피드백 게인 K 도출
+    lqr = LQRController(A, B_cart, Q, R, u_max=p["u_max"], u_quant=p["u_quant"])
+    
+    return A, B_cart, lqr.K
 
 
 def compute_solution(p):
-    A, B, K = compute_matrices(p)
+    A, B_cart, K = compute_matrices(p)
+    dp = get_dynamics_params(p)
+    lqr = LQRController(A, B_cart, Q, R, u_max=p["u_max"], u_quant=p["u_quant"])
 
-    def quantize(value, resolution):
-        if resolution <= 0:
-            return value
-        return resolution * np.round(value / resolution)
-
-    def nonlinear_state_derivative(t, X, u):
-        x, theta1, theta2, x_dot, theta1_dot, theta2_dot = X
-        M = p["M"]
-        m1 = p["m1"]
-        m2 = p["m2"]
-        L1 = p["L1"]
-        L2 = p["L2"]
-        g = p["g"]
-
-        c1 = np.cos(theta1)
-        c2 = np.cos(theta2)
-        c12 = np.cos(theta1 - theta2)
-        s1 = np.sin(theta1)
-        s2 = np.sin(theta2)
-        s12 = np.sin(theta1 - theta2)
-
-        Mq = np.array([
-            [M + m1 + m2, (0.5 * m1 + m2) * L1 * c1, 0.5 * m2 * L2 * c2],
-            [(0.5 * m1 + m2) * L1 * c1, (1.0 / 3.0 * m1 + m2) * L1**2, 0.5 * m2 * L1 * L2 * c12],
-            [0.5 * m2 * L2 * c2, 0.5 * m2 * L1 * L2 * c12, 1.0 / 3.0 * m2 * L2**2],
-        ])
-
-        nonlinear_terms = np.array([
-            -(0.5 * m1 + m2) * L1 * s1 * theta1_dot**2 - 0.5 * m2 * L2 * s2 * theta2_dot**2,
-            -0.5 * m2 * L1 * L2 * s12 * theta2_dot**2,
-            0.5 * m2 * L1 * L2 * s12 * theta1_dot**2,
-        ])
-
-        gravity_terms = np.array([
-            0.0,
-            (0.5 * m1 + m2) * g * L1 * s1,
-            0.5 * m2 * g * L2 * s2,
-        ])
-
-        damping_terms = np.array([
-            p["cart_damping"] * x_dot,
-            p["joint1_damping"] * theta1_dot,
-            p["joint2_damping"] * theta2_dot,
-        ])
-
-        disturbance = p["dist_amp"] * np.sin(2.0 * np.pi * p["dist_freq"] * t)
-        tau = np.array([u + disturbance, 0.0, 0.0])
-
-        q_ddot = la.solve(Mq, tau - nonlinear_terms - damping_terms + gravity_terms)
-        return np.array([x_dot, theta1_dot, theta2_dot, q_ddot[0], q_ddot[1], q_ddot[2]])
-
-    controller = {
-        "next_t": 0.0,
-        "u_hold": 0.0,
-    }
-
-    def closed_loop_dynamics(t, X):
-        if t + 1e-12 >= controller["next_t"]:
-            u_cmd = float((-K @ X)[0])
-            u_cmd = float(np.clip(u_cmd, -p["u_max"], p["u_max"]))
-            controller["u_hold"] = float(quantize(u_cmd, p["u_quant"]))
-            controller["next_t"] += p["control_dt"]
-
-        return nonlinear_state_derivative(t, X, controller["u_hold"])
-
-    X0 = np.array([p["x0"], p["theta1"], p["theta2"], 0.0, 0.0, 0.0])
-    sol = solve_ivp(closed_loop_dynamics, t_span, X0, t_eval=t_eval, max_step=0.02)
+    dt = p["control_dt"]
+    t0, tf = t_span
+    t_steps = np.arange(t0, tf + 1e-12, dt)
+    
+    t_all = []
+    y_all = []
+    
+    X = np.array([p["x0"], p["theta1"], p["theta2"], 0.0, 0.0, 0.0])
+    
+    for i in range(len(t_steps) - 1):
+        t_start = t_steps[i]
+        t_end = t_steps[i+1]
+        
+        # 현재 스텝 시작 시점의 상태를 기준으로 제어 입력 계산 후 고정 (ZOH)
+        u_hold = lqr.compute_input(X)
+        
+        def dynamics_interval(t, state_val):
+            x, theta1, theta2, x_dot, theta1_dot, theta2_dot = state_val
+            damping_vector = np.array([
+                p["cart_damping"] * x_dot,
+                p["joint1_damping"] * theta1_dot,
+                p["joint2_damping"] * theta2_dot,
+            ])
+            disturbance = p["dist_amp"] * np.sin(2.0 * np.pi * p["dist_freq"] * t)
+            tau_effective = np.array([u_hold + disturbance, 0.0, 0.0]) - damping_vector
+            return state_derivative(state_val, tau_effective, dp)
+            
+        sol_interval = solve_ivp(dynamics_interval, (t_start, t_end), X, max_step=dt/2.0)
+        X = sol_interval.y[:, -1]
+        
+        # 중복 방지를 위해 마지막 포인트 제외하고 수집
+        t_all.extend(sol_interval.t[:-1])
+        y_all.extend(sol_interval.y[:, :-1].T)
+        
+    t_all.append(t_steps[-1])
+    y_all.append(X)
+    
+    # 500프레임 애니메이션 요구 조건에 맞춰 시간 보간 수행
+    y_interpolated = np.zeros((6, len(t_eval)))
+    for idx in range(6):
+        y_interpolated[idx, :] = np.interp(t_eval, t_all, np.array(y_all)[:, idx])
+        
+    class ODESolutionWrapper:
+        def __init__(self, t, y):
+            self.t = t
+            self.y = y
+            
+    sol = ODESolutionWrapper(t_eval, y_interpolated)
     return sol, K
 
 
