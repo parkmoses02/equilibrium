@@ -3,7 +3,7 @@ import scipy.linalg as la
 from scipy.integrate import solve_ivp
 import matplotlib.pyplot as plt
 import matplotlib.animation as animation
-from matplotlib.widgets import Slider, TextBox
+from matplotlib.widgets import TextBox, Button
 from collections import deque
 
 # ==========================================
@@ -13,7 +13,7 @@ params = {
     # 물리 모델
     "M_cart": 0.8, "m_enc": 0.15, "m_pend": 0.2, "L": 0.3, "I_pend": 0.006, "g": 9.81,
     "x0": 0.0,
-    "theta0": 3.10,  # 바닥(약 177도)에서 시작
+    "theta0": 0.0,  # 초기: 위쪽 수직 (upright)
 
     "cart_damping": 1.2, "joint_damping": 0.01,
 
@@ -45,6 +45,8 @@ params = {
     "k_swing": 40.0,
     "k_center": 10.0,
     "kd_center": 8.0,
+    # 교수님 제어 게인 (default 0 — GUI에서 입력)
+    "kpa": 0.0, "kda": 0.0, "kpm": 0.0, "kdm": 0.0,
 
     # 하드웨어 시뮬레이션
     "sensor_noise_encoder": 0.001,   # 엔코더 노이즈 (rad)
@@ -86,6 +88,10 @@ def compute_solution(p):
     pos_res = p["pulley_circum"] / (p["motor_steps"] * p["microstepping"])
     angle_res = (2.0 * np.pi) / p["encoder_cpr"]
     u_quant = pos_res / (p["control_dt"]**2)
+
+    # Match firmware's accelerationRatio mapping from Pendulum.cpp
+    distanceRatio = p["pulley_circum"] / (float(p["motor_steps"]) * float(p["microstepping"]))
+    accelerationRatio = 0.015 / distanceRatio
 
     def nonlinear_dynamics(t, X, u):
         x, theta, x_dot, theta_dot = X
@@ -143,10 +149,17 @@ def compute_solution(p):
             q_theta_wrap = (q_theta_raw + np.pi) % (2 * np.pi) - np.pi
 
             if abs(q_theta_wrap) < p["catch_angle"]:
-                controller["mode"] = "LQR"
-                X_obs = np.array([q_x, q_theta_wrap, est_x_dot, est_theta_dot])
-                u_cmd = float((-K @ X_obs)[0])
+                # 교수님 제어기 (근접 제어) — invertedBalance style
+                controller["mode"] = "PROF"
+                sign = 1 if q_theta_wrap >= 0 else -1
+                # balancePos — use small offset (0 by default)
+                balancePos = p.get('balancePos', 0.0)
+                a = sign * (abs(q_theta_wrap) - balancePos)
+                # professor control signal mapping (same form as Pendulum.cpp)
+                controlSignal = (p.get('kpa', 0.0) * a + p.get('kda', 0.0) * est_theta_dot + p.get('kpm', 0.0) * q_x + p.get('kdm', 0.0) * est_x_dot) * accelerationRatio
+                u_cmd = float(controlSignal)
             else:
+                # Swing-up mode (unchanged)
                 controller["mode"] = "SWING"
                 J_total = p["I_pend"] + p["m_pend"] * p["L"]**2
                 energy = 0.5 * J_total * est_theta_dot**2 + p["m_pend"] * p["g"] * p["L"] * (np.cos(q_theta_wrap) - 1.0)
@@ -175,7 +188,8 @@ def compute_solution(p):
 # ==========================================
 # 3. 시각화
 # ==========================================
-sol, K, modes = compute_solution(params)
+sol, K, modes = None, None, None
+ani = None
 
 fig, ax = plt.subplots(figsize=(12, 8))
 plt.subplots_adjust(left=0.08, right=0.95, top=0.90, bottom=0.35)
@@ -194,68 +208,94 @@ cart_rect = plt.Rectangle((-cart_w/2, -cart_h/2), cart_w, cart_h, fc='steelblue'
 ax.add_patch(cart_rect)
 pendulum_line, = ax.plot([], [], 'o-', lw=4, markersize=10, color='firebrick')
 
-axcolor_phy = 'lightcyan'
-axcolor_lqr = 'lightgoldenrodyellow'
+axcolor = 'lightcyan'
 
-slider_axes = {
-    "m_pend": plt.axes([0.08, 0.25, 0.35, 0.02], facecolor=axcolor_phy),
-    "theta0": plt.axes([0.08, 0.21, 0.35, 0.02], facecolor=axcolor_phy),
-    "dist_amp": plt.axes([0.08, 0.17, 0.35, 0.02], facecolor=axcolor_phy),
-    "u_max": plt.axes([0.08, 0.13, 0.35, 0.02], facecolor=axcolor_phy),
-
-    "Q_x": plt.axes([0.55, 0.25, 0.35, 0.02], facecolor=axcolor_lqr),
-    "Q_theta": plt.axes([0.55, 0.21, 0.35, 0.02], facecolor=axcolor_lqr),
-    "Q_xdot": plt.axes([0.55, 0.17, 0.35, 0.02], facecolor=axcolor_lqr),
-    "Q_thetadot": plt.axes([0.55, 0.13, 0.35, 0.02], facecolor=axcolor_lqr),
+# Text inputs for professor gains (type exact values)
+gain_axes = {
+    "kpa": plt.axes([0.08, 0.22, 0.35, 0.04], facecolor=axcolor),
+    "kda": plt.axes([0.08, 0.16, 0.35, 0.04], facecolor=axcolor),
+    "kpm": plt.axes([0.55, 0.22, 0.35, 0.04], facecolor=axcolor),
+    "kdm": plt.axes([0.55, 0.16, 0.35, 0.04], facecolor=axcolor),
 }
 
-sliders = {
-    "m_pend": Slider(slider_axes["m_pend"], 'm_pend', 0.05, 1.0, valinit=params["m_pend"]),
-    "theta0": Slider(slider_axes["theta0"], 'Init Angle', -3.14, 3.14, valinit=params["theta0"]),
-    "dist_amp": Slider(slider_axes["dist_amp"], 'Disturb', 0.0, 3.0, valinit=params["dist_amp"]),
-    "u_max": Slider(slider_axes["u_max"], 'Ctrl Max u', 5.0, 25.0, valinit=params["u_max"]),
-
-    "Q_x": Slider(slider_axes["Q_x"], 'Q(x)', 1, 1000, valinit=params["Q_x"]),
-    "Q_theta": Slider(slider_axes["Q_theta"], 'Q(θ)', 1, 5000, valinit=params["Q_theta"]),
-    "Q_xdot": Slider(slider_axes["Q_xdot"], 'Q(v)', 1, 500, valinit=params["Q_xdot"]),
-    "Q_thetadot": Slider(slider_axes["Q_thetadot"], 'Q(ω)', 1, 1000, valinit=params["Q_thetadot"]),
+gain_boxes = {
+    "kpa": TextBox(gain_axes["kpa"], 'kpa (angle P): ', initial=str(params.get('kpa', 0.0))),
+    "kda": TextBox(gain_axes["kda"], 'kda (angle D): ', initial=str(params.get('kda', 0.0))),
+    "kpm": TextBox(gain_axes["kpm"], 'kpm (pos P): ', initial=str(params.get('kpm', 0.0))),
+    "kdm": TextBox(gain_axes["kdm"], 'kdm (pos D): ', initial=str(params.get('kdm', 0.0))),
 }
 
-text_axes = plt.axes([0.42, 0.02, 0.15, 0.04], facecolor='lightgrey')
-text_box = TextBox(text_axes, 'Reset: ', initial='')
+# Initial angle input (degrees)
+init_angle_axes = plt.axes([0.42, 0.02, 0.15, 0.04], facecolor='lightgrey')
+init_angle_box = TextBox(init_angle_axes, 'Init Angle (deg): ', initial=str(np.degrees(params.get('theta0', 0.0))))
 
 info_text = ax.text(0.02, 0.95, '', transform=ax.transAxes, va='top', fontsize=11, fontweight='bold')
 
 def update_text(frame):
+    if sol is None:
+        info_text.set_text("Press Start to run simulation. Enter gains and click Start.")
+        info_text.set_color('black')
+        return
     mode = modes[frame]
-    color = "green" if mode == "LQR" else "red"
+    color = "green" if mode == "LQR" else ("green" if mode == "PROF" else "red")
     theta = (sol.y[1, frame] + np.pi) % (2 * np.pi) - np.pi
     info_text.set_text(f"MODE: {mode}  |  Angle: {np.degrees(theta):.1f}°\n"
-                       f"Kx: {K[0,0]:.1f} | Kθ: {K[0,1]:.1f} | Kv: {K[0,2]:.1f} | Kω: {K[0,3]:.1f}\n"
-                       f"Hardware: NEMA17 + 600CPR Encoder (16μ-step)")
+                       f"Hardware: NEMA17 + 600CPR Encoder (16μ-step)\n"
+                       f"Gains(kpa,kda,kpm,kdm): {params.get('kpa',0)},{params.get('kda',0)},{params.get('kpm',0)},{params.get('kdm',0)}")
     info_text.set_color(color)
 
+def apply_gains():
+    """Read gain TextBoxes and store into params."""
+    for k, box in gain_boxes.items():
+        try:
+            params[k] = float(box.text.strip())
+        except Exception:
+            # ignore invalid input, keep previous
+            pass
+
+
+def on_init_angle_submit(text):
+    try:
+        deg = float(text.strip())
+        params['theta0'] = np.deg2rad(deg)
+        # if running, restart
+        if globals().get('ani') is not None:
+            start_simulation(None)
+    except Exception:
+        print('Invalid init angle')
+
+
 def recompute(_=None):
-    global sol, K, modes
-    for key, slider in sliders.items():
-        params[key] = slider.val
-    sol, K, modes = compute_solution(params)
+    # kept for API compatibility: apply gains but don't auto-run
+    apply_gains()
     fig.canvas.draw_idle()
 
-def reset_text(text):
-    if text.strip().lower() == 'reset':
-        defaults = {
-            "m_pend": 0.2, "theta0": 3.10, "dist_amp": 0.0, "u_max": 15.0,
-            "Q_x": 100, "Q_theta": 1000, "Q_xdot": 10, "Q_thetadot": 100
-        }
-        for key, val in defaults.items():
-            sliders[key].set_val(val)
-        recompute()
-        text_box.set_val('')
+def reset_clicked(event):
+    """Stop the running simulation and reset cart/pendulum to initial state."""
+    global sol, K, modes, ani
+    # stop animation if running
+    if globals().get('ani') is not None:
+        try:
+            ani.event_source.stop()
+        except Exception:
+            pass
+    ani = None
+    # clear solution so update shows initial pose
+    sol, K, modes = None, None, None
+    # reset cart/pendulum to initial params
+    cart_rect.set_xy((params.get('x0', 0.0) - cart_w/2, -cart_h/2))
+    theta0 = params.get('theta0', 0.0)
+    px = params['x0'] + params['L'] * np.sin(theta0)
+    py = params['L'] * np.cos(theta0)
+    pendulum_line.set_data([params['x0'], px], [0, py])
+    fig.canvas.draw_idle()
 
-for slider in sliders.values():
-    slider.on_changed(recompute)
-text_box.on_submit(reset_text)
+# bind TextBox submit handlers to apply immediately (do not auto-run)
+for box in gain_boxes.values():
+    box.on_submit(lambda text: apply_gains())
+
+# initial angle submit handler
+init_angle_box.on_submit(on_init_angle_submit)
 
 def init():
     cart_rect.set_xy((-cart_w/2, -cart_h/2))
@@ -274,5 +314,27 @@ def update(frame):
     update_text(frame)
     return cart_rect, pendulum_line, info_text
 
-ani = animation.FuncAnimation(fig, update, frames=len(t_eval), init_func=init, blit=True, interval=10)
+# Start and Reset buttons
+start_ax = plt.axes([0.78, 0.02, 0.12, 0.06])
+start_button = Button(start_ax, 'Start', color='lightgreen', hovercolor='green')
+
+stop_ax = plt.axes([0.64, 0.02, 0.12, 0.06])
+stop_button = Button(stop_ax, 'Stop', color='lightcoral', hovercolor='red')
+
+def start_simulation(event):
+    global sol, K, modes, ani
+    apply_gains()
+    sol, K, modes = compute_solution(params)
+    # stop previous animation
+    if ani is not None:
+        try:
+            ani.event_source.stop()
+        except Exception:
+            pass
+    ani = animation.FuncAnimation(fig, update, frames=len(t_eval), init_func=init, blit=True, interval=10)
+    fig.canvas.draw_idle()
+
+start_button.on_clicked(start_simulation)
+stop_button.on_clicked(reset_clicked)
+
 plt.show()
