@@ -3,10 +3,15 @@ import sys
 import struct
 from PyQt5 import QtWidgets, QtCore, QtGui
 import pyqtgraph as pg
-from panel.serial_protocol import SerialProtocol
 import math
 import numpy as np
-from panel import simulator
+
+try:
+    from .serial_protocol import SerialProtocol
+    from . import simulator
+except ImportError:
+    from serial_protocol import SerialProtocol
+    import simulator
 
 
 class PendulumWidget(QtWidgets.QWidget):
