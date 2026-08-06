@@ -1,0 +1,16 @@
+Function,ESP32 GPIO,TMC5160 pin,Notes
+Enable,GPIO13,EN,Active low
+SPI MOSI,GPIO23,SDI/CFG1,VSPI MOSI
+SPI MISO,GPIO19,SDO/CFG0,VSPI MISO
+SPI SCK,GPIO18,SCK/CFG2,VSPI CLK
+SPI CS,GPIO5,CSN/CFG3,VSPI CS; strapping pin, keep high during boot
+Step,GPIO14,STEP,
+Direction,GPIO27,DIR,
+Encoder A,GPIO34,External connector,Input-only
+Encoder B,GPIO35,External connector,Input-only
+IO1,GPIO21,J2,
+IO2,GPIO22,J2,
+IO3,GPIO25,J2,
+IO4,GPIO26,J2,
+IO5,GPIO32,J2,
+IO6,GPIO33,J2,
