@@ -3,7 +3,7 @@
  * Balance of a bar moved by a motor with a LQR controller
  * Use of TMC5160 stepper motor driver
  * Use of encoder to measure the position of the bar 400 lines
- * Boards: ESP32-C3 super mini, TMC5160
+ * Boards: Freenove ESP32 WROOM, TMC5160 carrier Rev.C
  */
 #include <Arduino.h>
 #include <Pendulum.h>

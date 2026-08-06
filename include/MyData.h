@@ -2,13 +2,20 @@
 
 #include <TMC.h>
 
-#define CHA 5    // Encoder channel A
-#define CHB 6    // Encoder channel B
-#define EN 0     // TMC5160 Enable
-#define CS 4     // TMC5160 Chip select
-#define MISO 1   // TMC5160 MISO
-#define MOSI 2   // TMC5160 MOSI
-#define SCK 3    // TMC5160 Clock
+// Freenove ESP32 WROOM + TMC5160 carrier Rev.C pin map.
+#define CHA 34   // Encoder channel A (input-only GPIO)
+#define CHB 35   // Encoder channel B (input-only GPIO)
+#define EN 13    // TMC5160 Enable (active low)
+#define CS 5     // TMC5160 CSN / VSPI CS; keep high while booting
+#define MISO 19  // TMC5160 SDO / VSPI MISO
+#define MOSI 23  // TMC5160 SDI / VSPI MOSI
+#define SCK 18   // TMC5160 SCK / VSPI clock
+
+// These pins are physically routed on Rev.C. The current firmware uses the
+// TMC5160 internal ramp controller over SPI, so STEP and DIR are reserved but
+// are not toggled directly by this program.
+#define TMC_STEP 14
+#define TMC_DIR 27
 #define CW 1     // Clockwise direction
 #define CCW 2    // Counter-clockwise direction
 #define MSTEPS 1 // Microsteps for TMC5160: 128
