@@ -1,0 +1,6 @@
+﻿Comment,Designator,Footprint,LCSC Part #,Manufacturer Part Number,Manufacturer,Quantity,Mounting,Order status
+2.54mm 1x20 female socket,"ESP_L,ESP_R",PinSocket_1x20_P2.54mm_Vertical,C7509519,DS1023-1x20SF11,CONNFLY Elec,2,THT,Verify JLC stock/THT service
+2.54mm 1x8 female socket,"TMC_L,TMC_R,J2",PinSocket_1x08_P2.54mm_Vertical,C27438,2.54-1*8P,BOOMELE,3,THT,Verify JLC stock/THT service
+2.54mm 1x5 female socket,J3,PinSocket_1x05_P2.54mm_Vertical,C7509517,DS1023-1x5SF11,CONNFLY Elec,1,THT,Verify JLC stock/THT service
+JST-PH 2.0mm 1x4 vertical header,J4,JST_PH_B4B-PH-K_1x04_P2.00mm_Vertical,C131334,B4B-PH-K-S(LF)(SN),JST,1,THT,Verify orientation in assembly preview
+5.08mm 2-pin screw terminal,J1,TerminalBlock_1x02_P5.08mm,C8465,WJ500V-5.08-2P,KANGNEX,1,THT,Verify voltage/current rating and orientation
