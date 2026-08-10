@@ -1,0 +1,174 @@
+** Drc report for esp32_wroom_tmc5160_carrier_revI_gerber_source.kicad_pcb **
+** Created on 2026-08-10T13:17:43 **
+** Report includes: Errors, Warnings **
+
+** Found 44 DRC violations **
+[silk_edge_clearance]: Silkscreen clipped by board edge
+    Rule: 기판 구성 제약 실크; warning
+    @(5.0000 mm, 5.0000 mm): Rectangle on Edge.Cuts
+    @(5.0000 mm, 5.0000 mm): Rectangle of H1 on f.silkscreen
+[silk_edge_clearance]: Silkscreen clipped by board edge
+    Rule: 기판 구성 제약 실크; warning
+    @(5.0000 mm, 5.0000 mm): Rectangle on Edge.Cuts
+    @(99.0000 mm, 75.0000 mm): Rectangle of H4 on f.silkscreen
+[silk_edge_clearance]: Silkscreen clipped by board edge
+    Rule: 기판 구성 제약 실크; warning
+    @(5.0000 mm, 5.0000 mm): Rectangle on Edge.Cuts
+    @(99.0000 mm, 5.0000 mm): Rectangle of H2 on f.silkscreen
+[lib_footprint_mismatch]: 풋프린트 'JST_PH_B4B-PH-K_1x04_P2.00mm_Vertical'이(가) 라이브러리 'Connector_JST'의 사본과 일치하지 않습니다
+    Local override; warning
+    @(96.0000 mm, 32.0800 mm): Footprint J4
+[lib_footprint_issues]: 현재 구성에 풋프린트 라이브러리 'Custom'이(가) 포함되어 있지 않습니다
+    Local override; warning
+    @(77.0000 mm, 8.0000 mm): Footprint J1
+[lib_footprint_issues]: 현재 구성에 풋프린트 라이브러리 'Custom'이(가) 포함되어 있지 않습니다
+    Local override; warning
+    @(10.0000 mm, 78.0000 mm): Footprint H3
+[lib_footprint_issues]: 현재 구성에 풋프린트 라이브러리 'Custom'이(가) 포함되어 있지 않습니다
+    Local override; warning
+    @(8.0000 mm, 8.0000 mm): Footprint H1
+[lib_footprint_issues]: 현재 구성에 풋프린트 라이브러리 'Custom'이(가) 포함되어 있지 않습니다
+    Local override; warning
+    @(102.0000 mm, 78.0000 mm): Footprint H4
+[lib_footprint_issues]: 현재 구성에 풋프린트 라이브러리 'Custom'이(가) 포함되어 있지 않습니다
+    Local override; warning
+    @(15.5000 mm, 18.0000 mm): Footprint R1
+[lib_footprint_issues]: 현재 구성에 풋프린트 라이브러리 'Custom'이(가) 포함되어 있지 않습니다
+    Local override; warning
+    @(15.5000 mm, 21.5000 mm): Footprint R2
+[lib_footprint_issues]: 현재 구성에 풋프린트 라이브러리 'Custom'이(가) 포함되어 있지 않습니다
+    Local override; warning
+    @(84.3500 mm, 27.0000 mm): Footprint TMC_R
+[lib_footprint_issues]: 현재 구성에 풋프린트 라이브러리 'Custom'이(가) 포함되어 있지 않습니다
+    Local override; warning
+    @(15.5000 mm, 27.7000 mm): Footprint R4
+[lib_footprint_issues]: 현재 구성에 풋프린트 라이브러리 'Custom'이(가) 포함되어 있지 않습니다
+    Local override; warning
+    @(50.7000 mm, 15.0000 mm): Footprint ESP_R
+[lib_footprint_issues]: 현재 구성에 풋프린트 라이브러리 'Custom'이(가) 포함되어 있지 않습니다
+    Local override; warning
+    @(10.0000 mm, 30.2400 mm): Footprint J2
+[lib_footprint_issues]: 현재 구성에 풋프린트 라이브러리 'Custom'이(가) 포함되어 있지 않습니다
+    Local override; warning
+    @(25.3000 mm, 15.0000 mm): Footprint ESP_L
+[lib_footprint_issues]: 현재 구성에 풋프린트 라이브러리 'Custom'이(가) 포함되어 있지 않습니다
+    Local override; warning
+    @(71.6500 mm, 27.0000 mm): Footprint TMC_L
+[lib_footprint_issues]: 현재 구성에 풋프린트 라이브러리 'Custom'이(가) 포함되어 있지 않습니다
+    Local override; warning
+    @(10.0000 mm, 16.0000 mm): Footprint J3
+[lib_footprint_issues]: 현재 구성에 풋프린트 라이브러리 'Custom'이(가) 포함되어 있지 않습니다
+    Local override; warning
+    @(102.0000 mm, 8.0000 mm): Footprint H2
+[lib_footprint_issues]: 현재 구성에 풋프린트 라이브러리 'Custom'이(가) 포함되어 있지 않습니다
+    Local override; warning
+    @(15.5000 mm, 25.1600 mm): Footprint R3
+[text_height]: 텍스트 높이가 범위를 벗어남 (보드의 최대 실크 텍스트 높이 제한 최소 높이 0.8000 mm; 실제 0.7500 mm)
+    Rule: 보드의 최대 실크 텍스트 높이 제한; warning
+    @(19.9500 mm, 18.0000 mm): Reference field of R1
+[text_height]: 텍스트 높이가 범위를 벗어남 (보드의 최대 실크 텍스트 높이 제한 최소 높이 0.8000 mm; 실제 0.7500 mm)
+    Rule: 보드의 최대 실크 텍스트 높이 제한; warning
+    @(19.9500 mm, 21.5000 mm): Reference field of R2
+[text_height]: 텍스트 높이가 범위를 벗어남 (보드의 최대 실크 텍스트 높이 제한 최소 높이 0.8000 mm; 실제 0.7500 mm)
+    Rule: 보드의 최대 실크 텍스트 높이 제한; warning
+    @(19.9500 mm, 27.7000 mm): Reference field of R4
+[text_height]: 텍스트 높이가 범위를 벗어남 (보드의 최대 실크 텍스트 높이 제한 최소 높이 0.8000 mm; 실제 0.7500 mm)
+    Rule: 보드의 최대 실크 텍스트 높이 제한; warning
+    @(19.9500 mm, 25.1600 mm): Reference field of R3
+[silk_overlap]: Silkscreen clearance
+    Rule: 기판 구성 제약 실크; warning
+    @(25.3000 mm, 12.2000 mm): Reference field of ESP_L
+    @(21.5000 mm, 12.6300 mm): Rectangle on f.silkscreen
+[silk_overlap]: Silkscreen clearance
+    Rule: 기판 구성 제약 실크; warning
+    @(50.7000 mm, 12.2000 mm): Reference field of ESP_R
+    @(21.5000 mm, 12.6300 mm): Rectangle on f.silkscreen
+[silk_overlap]: Silkscreen clearance
+    Rule: 기판 구성 제약 실크; warning
+    @(12.1500 mm, 26.6500 mm): Rectangle of R4 on f.silkscreen
+    @(7.0000 mm, 28.6300 mm): Rectangle of J2 on f.silkscreen
+[silk_overlap]: Silkscreen clearance
+    Rule: 기판 구성 제약 실크; warning
+    @(12.1500 mm, 26.6500 mm): Rectangle of R4 on f.silkscreen
+    @(7.0000 mm, 14.0800 mm): Rectangle of J3 on f.silkscreen
+[silk_overlap]: Silkscreen clearance
+    Rule: 기판 구성 제약 실크; warning
+    @(7.0000 mm, 14.0800 mm): Rectangle of J3 on f.silkscreen
+    @(12.1500 mm, 24.1100 mm): Rectangle of R3 on f.silkscreen
+[silk_overlap]: Silkscreen clearance
+    Rule: 기판 구성 제약 실크; warning
+    @(7.0000 mm, 14.0800 mm): Rectangle of J3 on f.silkscreen
+    @(12.1500 mm, 16.9500 mm): Rectangle of R1 on f.silkscreen
+[silk_overlap]: Silkscreen clearance
+    Rule: 기판 구성 제약 실크; warning
+    @(7.0000 mm, 14.0800 mm): Rectangle of J3 on f.silkscreen
+    @(12.1500 mm, 20.4500 mm): Rectangle of R2 on f.silkscreen
+[silk_over_copper]: Silkscreen clipped by solder mask
+    Local override; warning
+    @(12.1500 mm, 26.6500 mm): Rectangle of R4 on f.silkscreen
+    @(18.0400 mm, 27.7000 mm): PTH pad 2 [ENC_B] of R4
+[silk_over_copper]: Silkscreen clipped by solder mask
+    Local override; warning
+    @(7.0000 mm, 28.6300 mm): Rectangle of J2 on f.silkscreen
+    @(12.9600 mm, 27.7000 mm): PTH pad 1 [ENC_B_RAW] of R4
+[silk_over_copper]: Silkscreen clipped by solder mask
+    Local override; warning
+    @(12.1500 mm, 26.6500 mm): Rectangle of R4 on f.silkscreen
+    @(12.9600 mm, 27.7000 mm): PTH pad 1 [ENC_B_RAW] of R4
+[silk_over_copper]: Silkscreen clipped by solder mask
+    Local override; warning
+    @(10.0000 mm, 26.8300 mm): Reference field of J2
+    @(10.0000 mm, 26.1600 mm): PTH pad 5 [GND] of J3
+[silk_over_copper]: Silkscreen clipped by solder mask
+    Local override; warning
+    @(7.0000 mm, 14.0800 mm): Rectangle of J3 on f.silkscreen
+    @(12.9600 mm, 27.7000 mm): PTH pad 1 [ENC_B_RAW] of R4
+[silk_over_copper]: Silkscreen clipped by solder mask
+    Local override; warning
+    @(7.0000 mm, 14.0800 mm): Rectangle of J3 on f.silkscreen
+    @(12.9600 mm, 18.0000 mm): PTH pad 1 [+3V3] of R1
+[silk_over_copper]: Silkscreen clipped by solder mask
+    Local override; warning
+    @(7.0000 mm, 14.0800 mm): Rectangle of J3 on f.silkscreen
+    @(12.9600 mm, 21.5000 mm): PTH pad 1 [+3V3] of R2
+[silk_over_copper]: Silkscreen clipped by solder mask
+    Local override; warning
+    @(7.0000 mm, 14.0800 mm): Rectangle of J3 on f.silkscreen
+    @(12.9600 mm, 25.1600 mm): PTH pad 1 [ENC_A_RAW] of R3
+[silk_over_copper]: Silkscreen clipped by solder mask
+    Local override; warning
+    @(12.1500 mm, 24.1100 mm): Rectangle of R3 on f.silkscreen
+    @(18.0400 mm, 25.1600 mm): PTH pad 2 [ENC_A] of R3
+[silk_over_copper]: Silkscreen clipped by solder mask
+    Local override; warning
+    @(12.1500 mm, 24.1100 mm): Rectangle of R3 on f.silkscreen
+    @(12.9600 mm, 25.1600 mm): PTH pad 1 [ENC_A_RAW] of R3
+[silk_over_copper]: Silkscreen clipped by solder mask
+    Local override; warning
+    @(12.1500 mm, 20.4500 mm): Rectangle of R2 on f.silkscreen
+    @(18.0400 mm, 21.5000 mm): PTH pad 2 [ENC_B_RAW] of R2
+[silk_over_copper]: Silkscreen clipped by solder mask
+    Local override; warning
+    @(12.1500 mm, 16.9500 mm): Rectangle of R1 on f.silkscreen
+    @(18.0400 mm, 18.0000 mm): PTH pad 2 [ENC_A_RAW] of R1
+[silk_over_copper]: Silkscreen clipped by solder mask
+    Local override; warning
+    @(12.1500 mm, 16.9500 mm): Rectangle of R1 on f.silkscreen
+    @(12.9600 mm, 18.0000 mm): PTH pad 1 [+3V3] of R1
+[silk_over_copper]: Silkscreen clipped by solder mask
+    Local override; warning
+    @(12.1500 mm, 20.4500 mm): Rectangle of R2 on f.silkscreen
+    @(12.9600 mm, 21.5000 mm): PTH pad 1 [+3V3] of R2
+
+** Found 0 unconnected pads **
+
+** Found 0 Footprint errors **
+
+** Ignored checks **
+    - Footprint has no courtyard defined
+    - Track endpoint not centered on via
+    - Tuning profile track geometries
+    - Footprint doesn't match symbol's footprint filters
+    - Footprint component type doesn't match footprint pads
+
+** End of Report **
