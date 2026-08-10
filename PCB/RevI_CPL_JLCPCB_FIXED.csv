@@ -1,9 +1,0 @@
-Designator,Mid X,Mid Y,Layer,Rotation
-ESP_L,25.300mm,-39.130mm,Top,0
-ESP_R,50.700mm,-39.130mm,Top,0
-TMC_L,71.650mm,-35.890mm,Top,0
-TMC_R,84.350mm,-35.890mm,Top,0
-J1,77.000mm,-8.000mm,Top,0
-J2,10.000mm,-39.130mm,Top,0
-J3,10.000mm,-21.080mm,Top,0
-J4,96.000mm,-35.080mm,Top,270
