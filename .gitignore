@@ -4,5 +4,8 @@
 .vscode/launch.json
 .vscode/ipch
 
-PCB/.history/
+# KiCad Local History directories contain their own internal Git repositories.
+# Ignore them at every nesting level so `git add` does not treat them as broken
+# submodules ("does not have a commit checked out").
+.history/
 *.kicad_prl
