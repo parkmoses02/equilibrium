@@ -1,6 +1,7 @@
 #include <Arduino.h>
 #include <SPI.h>
 #include <math.h>
+#include <MyData.h>
 
 // 손으로 잡고 하는 업라이트 밸런스 테스트.
 // env:upright_balance_test로 빌드/업로드 후 115200 시리얼 모니터를 연다.
@@ -43,10 +44,18 @@ constexpr uint32_t REPORT_PERIOD_MS = 100;
 
 // Initial upright gains. These are intentionally moderate and must be tuned on
 // the actual mechanism. Output is commanded cart acceleration in m/s^2.
-constexpr float K_ANGLE = 50.0f;
-constexpr float K_ANGULAR_RATE = 8.0f; // raised with K_ANGLE to keep damping
-constexpr float K_CART_POSITION = 8.0f;
-constexpr float K_CART_VELOCITY = 5.0f;
+// 런타임에 시리얼로 조정한다. 재컴파일 없이 튜닝하기 위함.
+float gKangle = 50.0f;
+float gKrate = 8.0f;
+// 카트 항은 부호를 바로잡으면서 보수적으로 낮춰 잡았다. 아래 주석 참고.
+float gKcartPos = 3.0f;
+float gKcartVel = 2.0f;
+// 업라이트 기준각 보정 [rad]. 진자 무게중심/인코더 장착 오차로 '수직'이
+// 정확히 0 이 아니면 컨트롤러가 약간 기운 자세를 유지하려 하고, 그러려면
+// 계속 가속해야 해서 카트가 한쪽으로 끝없이 흘러간다.
+float angleTrim = 0.0f;
+// 카트 위치/속도 피드백의 방향. 아래 부호 설명 참고. C 로 뒤집어 확인 가능.
+int8_t cartFeedbackSign = 1;
 
 constexpr uint8_t REG_GCONF = 0x00;
 constexpr uint8_t REG_IOIN = 0x04;
@@ -65,6 +74,15 @@ constexpr int8_t QUADRATURE_TABLE[16] = {
     0, 1, -1, 0};
 
 SPISettings tmcSpi(1000000, MSBFIRST, SPI_MODE3);
+
+// 펄스 생성은 TMCStepDir(LEDC 하드웨어 PWM)에 맡긴다. 예전 구현은 loop()
+// 한 바퀴에 펄스 하나를 digitalWrite 로 찍어서, Serial.printf 가 나갈 때마다
+// (115200보에서 한 줄당 약 8ms) 펄스가 끊기고 실제 속도가 지령의 몇 분의
+// 일에 그쳤다. 카트가 기울기 방향으로 느리게 밀려가다 리밋에 닿던 원인.
+TMCStepDir motor(PIN_SPI_SCK, PIN_SPI_MOSI, PIN_SPI_MISO, PIN_TMC_CS,
+                 PIN_TMC_EN, PIN_TMC_STEP, PIN_TMC_DIR);
+constexpr float VEL_UNIT_TO_SPS = 12000000.0f / 16777216.0f;
+uint32_t spsToUnit(float sps) { return (uint32_t)(sps / VEL_UNIT_TO_SPS); }
 
 bool calibrated = false;
 bool armed = false;
@@ -158,22 +176,27 @@ uint32_t readRegister(uint8_t address)
 
 void configureDriver()
 {
+    // mStep_=4 -> CHOPCONF.MRES=4 = 1/16 마이크로스텝. STEPS_PER_METRE 와 일치.
+    // iHold/iRun 0.4/1.0 은 TMC::setCurrent() 에서 IHOLD=6 / IRUN=15 로 떨어져
+    // 기존 설정과 동일하다.
+    motor.init(0.4f, 1.0f, 4, 192);
+
+    // TMC::init() 은 en_pwm_mode=1(stealthChop) + TPWMTHRS=500 을 쓴다. 그러면
+    // 저속 구간이 stealthChop 이 되는데, 밸런싱은 영속도 부근에서 토크가 가장
+    // 필요하므로 여기서는 spreadCycle 로 되돌린다 (원래 이 테스트의 설정).
     writeRegister(REG_GCONF, 0x00000000);
-    // Last known-working current setting from the oscillation test.
-    writeRegister(REG_GLOBALSCALER, 192);
-    writeRegister(REG_IHOLD_IRUN, (6UL << 16) | (15UL << 8) | 6UL);
-    writeRegister(REG_TPOWERDOWN, 10);
-    // SpreadCycle, 1/16 microstep, TOFF=3, HSTRT=4, HEND=1, TBL=2.
-    const uint32_t chopconf =
-        (4UL << 24) | (2UL << 15) | (1UL << 7) | (4UL << 4) | 3UL;
-    writeRegister(REG_CHOPCONF, chopconf);
+    writeRegister(0x13, 0); // TPWMTHRS = 0
+
+    motor.setSpeed(spsToUnit(MAX_CART_SPEED_MPS * STEPS_PER_METRE));
+    // 직결 속도 지령을 쓰므로 내부 램프 가속도는 상한 역할만 한다.
+    motor.setAcceleration(0xFFFF);
 }
 
 void disarm(const char *reason)
 {
     armed = false;
     commandedVelocity = 0.0f;
-    digitalWrite(PIN_TMC_STEP, LOW);
+    motor.setVelocityDirect(0.0f); // 펄스 정지
     digitalWrite(PIN_TMC_EN, HIGH);
     Serial.print("DISARMED: ");
     Serial.println(reason);
@@ -193,6 +216,7 @@ void armController()
                       angle * 180.0f / PI);
         return;
     }
+    motor.actualPosition(0); // PCNT 위치 원점을 arm 지점으로
     cartStepCount = 0;
     cartPosition = 0.0f;
     commandedVelocity = 0.0f;
@@ -208,30 +232,10 @@ void serviceStepper()
 {
     if (!armed)
         return;
-
-    const float pulseRate = fabsf(commandedVelocity) * STEPS_PER_METRE;
-    if (pulseRate < 1.0f)
-    {
-        digitalWrite(PIN_TMC_STEP, LOW);
-        return;
-    }
-
-    const bool positive = commandedVelocity > 0.0f;
-    digitalWrite(PIN_TMC_DIR, positive ? HIGH : LOW);
-    const uint32_t periodUs = static_cast<uint32_t>(1000000.0f / pulseRate);
-    const uint32_t now = micros();
-    if (static_cast<int32_t>(now - nextStepUs) >= 0)
-    {
-        digitalWrite(PIN_TMC_STEP, HIGH);
-        delayMicroseconds(2);
-        digitalWrite(PIN_TMC_STEP, LOW);
-        cartStepCount += positive ? 1 : -1;
-        nextStepUs += periodUs;
-        if (static_cast<int32_t>(now - nextStepUs) > static_cast<int32_t>(periodUs))
-        {
-            nextStepUs = now + periodUs;
-        }
-    }
+    // 컨트롤러가 이미 가속도를 적분해 속도를 만들었으므로 그대로 직결한다.
+    // 펄스 간격은 LEDC 하드웨어가 만들므로 이 함수의 호출 주기나 Serial
+    // 출력과 무관하게 정확하다.
+    motor.setVelocityDirect(commandedVelocity * STEPS_PER_METRE);
 }
 
 void updateController()
@@ -248,7 +252,7 @@ void updateController()
     const float rawRate = (count - previousEncoderCount) * RAD_PER_COUNT / dt;
     previousEncoderCount = count;
     angularRate += 0.25f * (rawRate - angularRate);
-    cartPosition = cartStepCount / STEPS_PER_METRE;
+    cartPosition = motor.getSPIPosition() / STEPS_PER_METRE;
 
     if (!armed)
         return;
@@ -263,8 +267,15 @@ void updateController()
         return;
     }
 
+    // 카트 항의 부호가 핵심이다. 역진자는 비최소위상계라서, +X 에 있는 카트를
+    // 중앙으로 되돌리려면 먼저 카트를 +X 로 가속해야 한다. 그래야 진자가 -X 로
+    // 기울고, 각도 루프가 그 기울기를 따라가며 카트를 -X 로 끌고 온다.
+    // 즉 위치/속도 항은 각도 항과 '같은' 방향(+)으로 들어가야 한다.
+    // 기존 코드는 - 였고, 그래서 카트 위치가 규제되지 않고 한쪽으로 밀려나
+    // 리밋에 닿았다. (진자는 잘 세운 채로 쭉 가던 증상)
     float acceleration =
-        controlPolarity * (K_ANGLE * angle + K_ANGULAR_RATE * angularRate) - K_CART_POSITION * cartPosition - K_CART_VELOCITY * commandedVelocity;
+        controlPolarity * (gKangle * (angle - angleTrim) + gKrate * angularRate) +
+        cartFeedbackSign * (gKcartPos * cartPosition + gKcartVel * commandedVelocity);
     acceleration = constrain(acceleration,
                              -MAX_CART_ACCEL_MPS2,
                              MAX_CART_ACCEL_MPS2);
@@ -274,10 +285,23 @@ void updateController()
                                   MAX_CART_SPEED_MPS);
 }
 
+void printGains()
+{
+    Serial.printf("GAINS angle=%.2f rate=%.2f cartPos=%.2f cartVel=%.2f "
+                  "trim=%+.2fdeg pol=%d cartSign=%d\n",
+                  gKangle, gKrate, gKcartPos, gKcartVel,
+                  angleTrim * 180.0f / PI, controlPolarity, cartFeedbackSign);
+}
+
 void printHelp()
 {
     Serial.println("Commands: Z=zero while hanging DOWN, A=arm while held UP,");
-    Serial.println("          X=disarm, P=flip feedback polarity (only while disarmed), H=help");
+    Serial.println("          X=disarm, P=flip angle polarity (disarmed only), H=help");
+    Serial.println("Tuning (live, works while armed):");
+    Serial.println("  [ ] = angle trim -/+ 0.2deg   <- use this to stop steady drift");
+    Serial.println("  1/2 = K_angle -/+10%    3/4 = K_rate -/+10%");
+    Serial.println("  5/6 = K_cartPos -/+10%  7/8 = K_cartVel -/+10%");
+    Serial.println("  C = flip cart feedback sign   G = show gains");
 }
 
 void handleSerial()
@@ -311,6 +335,33 @@ void handleSerial()
                 controlPolarity = -controlPolarity;
                 Serial.printf("Feedback polarity is now %d.\n", controlPolarity);
             }
+        }
+        else if (command == 'c' || command == 'C')
+        {
+            cartFeedbackSign = -cartFeedbackSign;
+            Serial.printf("Cart feedback sign is now %d.\n", cartFeedbackSign);
+        }
+        else if (command == '[')
+        {
+            angleTrim -= 0.2f * PI / 180.0f;
+            Serial.printf("angleTrim = %+.2f deg\n", angleTrim * 180.0f / PI);
+        }
+        else if (command == ']')
+        {
+            angleTrim += 0.2f * PI / 180.0f;
+            Serial.printf("angleTrim = %+.2f deg\n", angleTrim * 180.0f / PI);
+        }
+        else if (command == '1') { gKangle *= 0.9f; printGains(); }
+        else if (command == '2') { gKangle *= 1.1f; printGains(); }
+        else if (command == '3') { gKrate *= 0.9f; printGains(); }
+        else if (command == '4') { gKrate *= 1.1f; printGains(); }
+        else if (command == '5') { gKcartPos *= 0.9f; printGains(); }
+        else if (command == '6') { gKcartPos *= 1.1f; printGains(); }
+        else if (command == '7') { gKcartVel *= 0.9f; printGains(); }
+        else if (command == '8') { gKcartVel *= 1.1f; printGains(); }
+        else if (command == 'g' || command == 'G')
+        {
+            printGains();
         }
         else if (command == 'h' || command == 'H')
         {
@@ -352,6 +403,10 @@ void setup()
             delay(1000);
     }
     configureDriver();
+    // motor.init() 이 끝에서 EN 을 LOW 로 내려 드라이버를 켠다. 이 테스트는
+    // arm 전까지 출력이 꺼져 있어야 (Z 로 0점 잡을 때 손으로 움직일 수 있게)
+    // 하므로 다시 비활성으로 돌린다. armController() 가 LOW 로 내린다.
+    digitalWrite(PIN_TMC_EN, HIGH);
     printHelp();
     Serial.println("Begin with VM=12 V. Do not use 36 V for the first balance test.");
 }

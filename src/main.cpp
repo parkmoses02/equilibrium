@@ -9,7 +9,17 @@
 #include <Pendulum.h>
 
 Encoder encoder(CHA, CHB);                 // Create encoder object
-TMC tmc(SCK, MOSI, MISO, CS, EN);          // Create TMC object with pin definitions
+
+// 백엔드는 MyData.h 의 USE_STEPDIR_BACKEND 로 고른다. 아래 tmc 는 어느 쪽이든
+// TMC& 로 쓰이므로, 이 파일의 나머지와 Pendulum.cpp 는 백엔드를 신경쓰지 않는다.
+#if USE_STEPDIR_BACKEND
+// SD_MODE = 1 보드 (BIGTREETECH TMC5160T Pro 등): STEP/DIR + 소프트웨어 램프
+TMCStepDir tmcBackend(SCK, MOSI, MISO, CS, EN, TMC_STEP, TMC_DIR);
+#else
+// SD_MODE = 0 보드 (TMC5160_BOB 등): 칩 내장 모션 컨트롤러
+TMC tmcBackend(SCK, MOSI, MISO, CS, EN);
+#endif
+TMC &tmc = tmcBackend;
 // 600-PPR encoder read on both edges of both channels -> 2400 counts/rev.
 // (The reference code used 10000; that is a different encoder.)
 Pendulum pendulum(2400, 200, 128, 0.04f); // Create Pendulum object with parameters
@@ -228,8 +238,9 @@ void resetTMC()
     // Currents chosen to land on the IHOLD=6 / IRUN=15 codes that the bench
     // tests in src/tests/ proved can actually drive this cart (the reference
     // values of 0.05/0.25 A gave IRUN=3, far too weak to move it).
-    tmc.init(0.4f, 1.0f, MSTEPS); // hold ~code 6, run ~code 15 of 31
-    tmc.setGlobalScaler(192);     // Set global scaler to 192/256, as in the tests
+    // Scaler 192/256 as in the tests; init() now applies it before enabling
+    // the outputs, so it is no longer a separate call afterwards.
+    tmc.init(0.4f, 1.0f, MSTEPS, 192); // hold ~code 6, run ~code 15 of 31
     standby();
 }
 void resetEncoder()

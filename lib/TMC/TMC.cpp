@@ -21,9 +21,12 @@ void TMC::begin() {
     SPI.begin(sck, miso, mosi);
     SPI.setDataMode(SPI_MODE0);
 }
-void TMC::init(float iHold_, float iRun_, float mStep_) {
+void TMC::init(float iHold_, float iRun_, float mStep_, uint8_t scaler_) {
   begin();
   setConfiguration(mStep_);
+  // GLOBALSCALER resets to 0, which the driver reads as full scale. Set it
+  // before setCurrent() so IRUN is never briefly applied at 256/256.
+  setGlobalScaler(scaler_);
   setCurrent(iHold_, iRun_);
   setRampMode(0);
   actualPosition(0);

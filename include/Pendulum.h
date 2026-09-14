@@ -1,3 +1,4 @@
+#pragma once
 #include "MyData.h"
 #include <Speed.h>
 class Pendulum {

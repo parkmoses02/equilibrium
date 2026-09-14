@@ -1,3 +1,4 @@
+#pragma once
 /*
 * Library for controlling 2 channels rotary encoder with interrupts.
 * Created by Magdi Laoun, 19th July 2025.
