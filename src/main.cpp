@@ -3,14 +3,16 @@
  * Balance of a bar moved by a motor with a LQR controller
  * Use of TMC5160 stepper motor driver
  * Use of encoder to measure the position of the bar 400 lines
- * Boards: Freenove ESP32 WROOM, TMC5160 carrier Rev.C
+ * Boards: Freenove ESP32 WROOM 32e, TMC5160 carrier Rev.C
  */
 #include <Arduino.h>
 #include <Pendulum.h>
 
 Encoder encoder(CHA, CHB);                 // Create encoder object
 TMC tmc(SCK, MOSI, MISO, CS, EN);          // Create TMC object with pin definitions
-Pendulum pendulum(10000, 200, 128, 0.04f); // Create Pendulum object with parameters
+// 600-PPR encoder read on both edges of both channels -> 2400 counts/rev.
+// (The reference code used 10000; that is a different encoder.)
+Pendulum pendulum(2400, 200, 128, 0.04f); // Create Pendulum object with parameters
 MoveMode moveMode = STANDBY;               // Initial move mode
 uint64_t lastTime = 0;                     // Variable to store time
 uint8_t phaseCounter = 0;                  // Counter
@@ -29,6 +31,7 @@ void setMoveMode(MoveMode mode);
 void setup()
 {
     Serial.begin(115200); // Initialize serial communication at 115200 baud rate
+    encoder.begin();      // Attach encoder interrupts (not done in the constructor)
     resetTMC();           // Reset TMC5160
 }
 void loop()
@@ -222,8 +225,11 @@ void dumping()
 }
 void resetTMC()
 {
-    tmc.init(0.05, 0.25, MSTEPS); // Initialize TMC5160 with hold current 0.05A and run current 0.2A
-    tmc.setGlobalScaler(180);     // Set global scaler to 180/256
+    // Currents chosen to land on the IHOLD=6 / IRUN=15 codes that the bench
+    // tests in src/tests/ proved can actually drive this cart (the reference
+    // values of 0.05/0.25 A gave IRUN=3, far too weak to move it).
+    tmc.init(0.4f, 1.0f, MSTEPS); // hold ~code 6, run ~code 15 of 31
+    tmc.setGlobalScaler(192);     // Set global scaler to 192/256, as in the tests
     standby();
 }
 void resetEncoder()

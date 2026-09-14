@@ -22,11 +22,17 @@ class PendulumWidget(QtWidgets.QWidget):
         super().__init__(parent)
         self.angle_deg = 0.0
         self.position_mm = 0.0
-        self.setMinimumHeight(200)
+        self.range_mm = 150.0
+        self.setMinimumHeight(220)
 
     def set_state(self, angle_deg, position_mm):
         self.angle_deg = angle_deg
         self.position_mm = position_mm
+        self.update()
+
+    def set_range(self, range_mm):
+        """Rail travel range (mm) used to map position_mm to the widget width."""
+        self.range_mm = max(1.0, float(range_mm))
         self.update()
 
     def paintEvent(self, event):
@@ -39,9 +45,9 @@ class PendulumWidget(QtWidgets.QWidget):
             rail_y_i = int(round(rail_y))
             p.setPen(QtGui.QPen(QtGui.QColor(50, 50, 50), 3))
             p.drawLine(10, rail_y_i, w - 10, rail_y_i)
-            # map position_mm to x coordinate
-            # assume ±150 mm range maps to widget width
-            px = (self.position_mm + 150.0) / 300.0 * (w - 40) + 20
+            # map position_mm to x coordinate using the configured rail range
+            pos_clamped = max(-self.range_mm, min(self.range_mm, self.position_mm))
+            px = (pos_clamped + self.range_mm) / (2.0 * self.range_mm) * (w - 40) + 20
             # draw cart as rectangle
             cart_w, cart_h = 40, 18
             cart_rect = QtCore.QRectF(px - cart_w / 2, rail_y - cart_h, cart_w, cart_h)
@@ -149,19 +155,28 @@ class OptimizeWorker(QtCore.QThread):
  
  
 ADDR = {
+    # Device -> PC telemetry
     'angle': 0x00,
     'angularVelocity': 0x01,
     'position': 0x02,
     'velocity': 0x03,
+    # PC -> device parameters (see checkSerial() in src/main.cpp)
     'magnitude': 0x00,
     'speed': 0x01,
     'acceleration': 0x02,
     'threshold': 0x03,
-    'setMoveMode': 0x50,
+    'balancePos': 0x06,
+    'limit': 0x07,
+    'loopImpulse1': 0x08,
+    'loopImpulse2': 0x09,
+    'loopAngle': 0x0A,
     'kpa': 0x20,
     'kda': 0x21,
     'kpm': 0x22,
     'kdm': 0x23,
+    'setMoveMode': 0x50,
+    'resetTMC': 0x51,
+    'resetEncoder': 0x52,
 }
 
 
@@ -180,7 +195,11 @@ class MainWindow(QtWidgets.QMainWindow):
             QPushButton { background-color: #e0e4e8; border: 1px solid #a0a5ad; border-radius: 4px; padding: 5px; font-weight: bold; }
             QPushButton:hover { background-color: #d0d4d8; }
             QPushButton#startBtn { background-color: #1f66ff; color: white; border: none; font-size: 14px; padding: 10px;}
+            QPushButton#startBtn:hover { background-color: #4785ff; }
+            QPushButton#startBtn:pressed { background-color: #0d47cc; padding-top: 12px; padding-bottom: 8px; }
             QPushButton#stopBtn { background-color: #ff3b30; color: white; border: none; font-size: 14px; padding: 10px;}
+            QPushButton#stopBtn:hover { background-color: #ff6b62; }
+            QPushButton#stopBtn:pressed { background-color: #cc2419; padding-top: 12px; padding-bottom: 8px; }
             QLabel#riccatiLabel { background-color: #4a90e2; color: white; font-size: 16px; font-weight: bold; padding: 8px; border-radius: 5px; }
             QLabel#sectionHeader { font-size: 16px; font-weight: bold; color: #2c3e50; }
         """)
@@ -206,10 +225,10 @@ class MainWindow(QtWidgets.QMainWindow):
         grp_reg = QtWidgets.QGroupBox('Regulation coefficients')
         grp_reg.setStyleSheet("QGroupBox { background-color: #eef4fc; border: 1px solid #aec2e8; }")
         lreg = QtWidgets.QVBoxLayout()
-        self.kpa_container, self.kpa_spin, self.kpa_slider = self.create_gain_slider('kpa [m/rad/s^2] =', -500.0, 500.0, 144.6164)
-        self.kda_container, self.kda_spin, self.kda_slider = self.create_gain_slider('kda [m/rad/s] =', -100.0, 100.0, 22.0)
-        self.kpm_container, self.kpm_spin, self.kpm_slider = self.create_gain_slider('kpm [1/s^2] =', -500.0, 500.0, 224.0)
-        self.kdm_container, self.kdm_spin, self.kdm_slider = self.create_gain_slider('kdm [1/s] =', -100.0, 100.0, 62.0)
+        self.kpa_container, self.kpa_spin, self.kpa_slider = self.create_gain_slider('kpa [m/rad/s^2] =', -500.0, 500.0, 50.0)
+        self.kda_container, self.kda_spin, self.kda_slider = self.create_gain_slider('kda [m/rad/s] =', -100.0, 100.0, 8.0)
+        self.kpm_container, self.kpm_spin, self.kpm_slider = self.create_gain_slider('kpm [1/s^2] =', -500.0, 500.0, 8.0)
+        self.kdm_container, self.kdm_spin, self.kdm_slider = self.create_gain_slider('kdm [1/s] =', -100.0, 100.0, 5.0)
         lreg.addWidget(self.kpa_container); lreg.addWidget(self.kda_container)
         lreg.addWidget(self.kpm_container); lreg.addWidget(self.kdm_container)
         self.send_k_btn = QtWidgets.QPushButton('Send K to Firmware')
@@ -220,9 +239,12 @@ class MainWindow(QtWidgets.QMainWindow):
         grp_limits = QtWidgets.QGroupBox('Limits parameters')
         grp_limits.setStyleSheet("QGroupBox { background-color: #fceeee; border: 1px solid #e8aec0; }")
         llim = QtWidgets.QFormLayout()
-        self.max_magnitude = QtWidgets.QDoubleSpinBox(); self.max_magnitude.setRange(0,1000); self.max_magnitude.setValue(120)
-        self.max_speed = QtWidgets.QDoubleSpinBox(); self.max_speed.setRange(0,10000); self.max_speed.setValue(600)
-        self.max_acc = QtWidgets.QDoubleSpinBox(); self.max_acc.setRange(0,100); self.max_acc.setValue(3.3)
+        # Defaults taken from src/tests/upright_balance_test.cpp:
+        #   CART_SOFT_LIMIT_M 0.30 m, MAX_CART_SPEED_MPS 0.80 m/s,
+        #   MAX_CART_ACCEL_MPS2 12.0 m/s^2
+        self.max_magnitude = QtWidgets.QDoubleSpinBox(); self.max_magnitude.setRange(0,1000); self.max_magnitude.setValue(300)
+        self.max_speed = QtWidgets.QDoubleSpinBox(); self.max_speed.setRange(0,10000); self.max_speed.setValue(800)
+        self.max_acc = QtWidgets.QDoubleSpinBox(); self.max_acc.setRange(0,100); self.max_acc.setValue(12.0)
         llim.addRow('Max magnitude (rail) [mm] =', self.max_magnitude)
         llim.addRow('Max speed [mm/s] =', self.max_speed)
         llim.addRow('Max acceleration [m/s^2] =', self.max_acc)
@@ -235,7 +257,10 @@ class MainWindow(QtWidgets.QMainWindow):
         self.mag1 = QtWidgets.QDoubleSpinBox(); self.mag1.setRange(0,1000); self.mag1.setValue(56.21)
         self.mag2 = QtWidgets.QDoubleSpinBox(); self.mag2.setRange(0,1000); self.mag2.setValue(100)
         self.progression = QtWidgets.QDoubleSpinBox(); self.progression.setRange(0,10); self.progression.setValue(1)
-        self.threshold = QtWidgets.QDoubleSpinBox(); self.threshold.setRange(0,1000); self.threshold.setValue(160)
+        # 158 deg = 180 - 22, matching TRIP_ANGLE_RAD (22 deg from upright) in
+        # upright_balance_test.cpp, expressed in this firmware's convention
+        # where 0 deg is hanging down and 180 deg is upright.
+        self.threshold = QtWidgets.QDoubleSpinBox(); self.threshold.setRange(0,1000); self.threshold.setValue(158)
         self.balance_pos = QtWidgets.QDoubleSpinBox(); self.balance_pos.setRange(-360, 360); self.balance_pos.setValue(180)
         lloop.addRow('Magnitude 1 [mm] =', self.mag1); lloop.addRow('Magnitude 2 [mm] =', self.mag2)
         lloop.addRow('Progression =', self.progression); lloop.addRow('Threshold [degree] =', self.threshold)
@@ -268,8 +293,23 @@ class MainWindow(QtWidgets.QMainWindow):
         self.balance_btn = QtWidgets.QPushButton('Balance')
         self.stop_btn = QtWidgets.QPushButton('Stop')
         self.stop_btn.setObjectName("stopBtn")
-        btns.addWidget(self.start_btn); btns.addWidget(self.balance_btn); btns.addWidget(self.stop_btn)
+        self.inv_balance_btn = QtWidgets.QPushButton('Inv. Balance')
+        btns.addWidget(self.start_btn); btns.addWidget(self.balance_btn)
+        btns.addWidget(self.inv_balance_btn); btns.addWidget(self.stop_btn)
         lport.addLayout(btns)
+
+        btns2 = QtWidgets.QHBoxLayout()
+        self.send_params_btn = QtWidgets.QPushButton('Send Parameters')
+        self.reset_enc_btn = QtWidgets.QPushButton('Reset Encoder (zero here)')
+        btns2.addWidget(self.send_params_btn); btns2.addWidget(self.reset_enc_btn)
+        lport.addLayout(btns2)
+
+        self.tx_label = QtWidgets.QLabel('TX: -')
+        self.tx_label.setStyleSheet("font-family: Consolas, monospace; font-size: 11px; color: #1f66ff;")
+        lport.addWidget(self.tx_label)
+        self.rx_label = QtWidgets.QLabel('RX: not connected')
+        self.rx_label.setStyleSheet("font-family: Consolas, monospace; font-size: 11px; color: #333;")
+        lport.addWidget(self.rx_label)
         grp_port.setLayout(lport)
         left_layout.addWidget(grp_port)
 
@@ -342,6 +382,9 @@ class MainWindow(QtWidgets.QMainWindow):
         pg.setConfigOption('background', '#e8f0eb')
         pg.setConfigOption('foreground', 'k')
 
+        self.pendulum_widget = PendulumWidget()
+        right_layout.addWidget(self.pendulum_widget, 0, 0, 1, 2)
+
         self.plot_angle = pg.PlotWidget(title='Angle (degree)')
         self.plot_pos = pg.PlotWidget(title='Position (mm)')
         self.plot_acc = pg.PlotWidget(title='Control / Acceleration (m/s^2)')
@@ -351,10 +394,13 @@ class MainWindow(QtWidgets.QMainWindow):
             p.showGrid(x=True, y=True, alpha=0.5)
             p.setLabel('bottom', 'Time (ms)')
 
-        right_layout.addWidget(self.plot_angle, 0, 0)
-        right_layout.addWidget(self.plot_pos, 1, 0)
-        right_layout.addWidget(self.plot_acc, 0, 1)
-        right_layout.addWidget(self.plot_vel, 1, 1)
+        right_layout.addWidget(self.plot_angle, 1, 0)
+        right_layout.addWidget(self.plot_pos, 2, 0)
+        right_layout.addWidget(self.plot_acc, 1, 1)
+        right_layout.addWidget(self.plot_vel, 2, 1)
+        right_layout.setRowStretch(0, 1)
+        right_layout.setRowStretch(1, 2)
+        right_layout.setRowStretch(2, 2)
         main_layout.addWidget(right_widget, stretch=1)
 
         self.sim_angle_curve = self.plot_angle.plot([], [], pen=pg.mkPen('r', width=2))
@@ -376,15 +422,34 @@ class MainWindow(QtWidgets.QMainWindow):
 
         self.serial = None
 
+        # ── Live telemetry from the board (radians / metres), filled in by
+        #    on_float() as 0xAA-framed packets arrive. None until connected
+        #    and the first packet for that field has been received.
+        self._live_angle = None
+        self._live_position = None
+        self._rx_count = 0
+
+        # ── Pendulum animation playback state ──────────────────────────
+        self._anim_traj = None
+        self._anim_dt = 0.001
+        self._anim_idx = 0
+        self.anim_timer = QtCore.QTimer(self)
+        self.anim_timer.timeout.connect(self._advance_animation)
+        self.anim_timer.start(33)  # ~30 fps
+
         self.connect_btn.clicked.connect(self.on_connect)
         self.start_btn.clicked.connect(self.on_start)
         self.balance_btn.clicked.connect(self.on_balance)
+        self.inv_balance_btn.clicked.connect(self.on_inverted_balance)
         self.stop_btn.clicked.connect(self.on_stop)
+        self.send_params_btn.clicked.connect(self.send_parameters)
+        self.reset_enc_btn.clicked.connect(self.on_reset_encoder)
         
         self.calc_lqr_btn.clicked.connect(self.calculate_lqr)
         self.stop_opt_btn.clicked.connect(self._stop_optimization)
         self.send_k_btn.clicked.connect(self.send_manual_gains)
         self.max_magnitude.valueChanged.connect(self.update_limit_lines)
+        self.max_magnitude.valueChanged.connect(lambda val: self.pendulum_widget.set_range(val))
         self.max_acc.valueChanged.connect(self.update_limit_lines)
         self.max_speed.valueChanged.connect(self.update_limit_lines)
         
@@ -481,6 +546,12 @@ class MainWindow(QtWidgets.QMainWindow):
         self.sim_vel_curve.setData(t_ms, vel_mm)
         self.sim_acc_curve.setData(t_ms, u_array)
 
+        # Restart the pendulum animation from the beginning of the new trajectory.
+        self._anim_traj = traj
+        self._anim_dt = dt
+        self._anim_idx = 0
+        self.pendulum_widget.set_range(float(self.max_magnitude.value()))
+
         a_min, a_max = float(np.min(angle_deg)), float(np.max(angle_deg))
         p_min, p_max = float(np.min(pos_mm)), float(np.max(pos_mm))
         v_min, v_max = float(np.min(vel_mm)), float(np.max(vel_mm))
@@ -520,6 +591,43 @@ class MainWindow(QtWidgets.QMainWindow):
         else:
             self.riccati_label.setText(f'Ricatti Integration: {cost_integral:.6f}')
             self.riccati_label.setStyleSheet("background-color: #4a90e2; color: white; font-size: 16px; font-weight: bold; padding: 8px; border-radius: 5px;")
+
+    def _advance_animation(self):
+        """Timer tick: redraw the pendulum widget from live board telemetry
+        when connected, otherwise step through the simulated trajectory
+        (looping back to the start once it reaches the end)."""
+        if self.serial is None:
+            self.rx_label.setText('RX: not connected')
+        elif self._rx_count == 0:
+            self.rx_label.setText('RX: connected, but NO packets received')
+        else:
+            self.rx_label.setText(
+                f'RX: {self._rx_count} pkt  angle={(self._live_angle or 0.0) * 180.0 / math.pi:+.2f} deg'
+                f'  pos={(self._live_position or 0.0) * 1000.0:+.1f} mm')
+
+        if self.serial is not None and self._live_angle is not None:
+            # The firmware reports the raw encoder angle, whose zero is wherever
+            # the encoder was last reset - i.e. hanging straight down. The widget
+            # already draws 0 deg as "hanging down", so no 180 deg shift here.
+            # (The simulation path below is different: its theta is measured
+            # from upright, so it needs the shift.)
+            angle_deg = self._live_angle * 180.0 / math.pi
+            pos_mm = (self._live_position or 0.0) * 1000.0
+            self.pendulum_widget.set_state(angle_deg, pos_mm)
+            return
+
+        traj = self._anim_traj
+        if traj is None or len(traj) == 0:
+            return
+        step = max(1, int(round(0.033 / max(self._anim_dt, 1e-6))))
+        self._anim_idx += step
+        if self._anim_idx >= len(traj):
+            self._anim_idx = 0
+
+        theta = traj[self._anim_idx, 0]
+        pos_m = traj[self._anim_idx, 2]
+        angle_deg = 180.0 + theta * 180.0 / math.pi
+        self.pendulum_widget.set_state(angle_deg, pos_m * 1000.0)
 
     def calculate_lqr(self):
         # ── 이미 실행 중이면 무시 ──────────────────────────────────────────
@@ -583,8 +691,8 @@ class MainWindow(QtWidgets.QMainWindow):
         ev = best.get('ev')
         if ev is None:
             QtWidgets.QMessageBox.critical(self, 'K 최적화 오류',
-                                           '유효한 K를 찾지 못했습니다.\n'
-                                           '초기 K값이 너무 불안정하거나 한계치가 너무 좁습니다.')
+                                        '유효한 K를 찾지 못했습니다.\n'
+                                        '초기 K값이 너무 불안정하거나 한계치가 너무 좁습니다.')
             self.riccati_label.setText('Ricatti Integration: N/A')
             self.riccati_label.setStyleSheet(
                 "background-color: #ff3b30; color: white; font-size: 16px;"
@@ -629,37 +737,107 @@ class MainWindow(QtWidgets.QMainWindow):
                 self.serial = SerialProtocol(port, 115200, callback=self.on_float)
                 self.serial.open()
                 self.connect_btn.setText('Disconnect')
+                self._live_angle = None
+                self._live_position = None
+                self._rx_count = 0
             except Exception as e: QtWidgets.QMessageBox.critical(self, 'Serial error', str(e))
         else:
             try: self.serial.close()
-            finally: self.serial = None; self.connect_btn.setText('Connect')
+            finally:
+                self.serial = None; self.connect_btn.setText('Connect')
+                self._live_angle = None
+                self._live_position = None
+
+    def _require_serial(self):
+        if not self.serial:
+            self.tx_label.setText('TX: not connected')
+            return False
+        return True
+
+    def send_parameters(self):
+        """Push every Limits/Start/Looping parameter to the firmware.
+
+        The spin boxes are in mm / mm/s / degrees, but the firmware setters
+        expect metres / m/s / radians, so convert on the way out. Without
+        this the firmware keeps its 0.0f defaults - and a speed and
+        acceleration of zero mean the motor cannot move at all.
+        """
+        if not self._require_serial():
+            return
+        deg2rad = math.pi / 180.0
+        params = [
+            (ADDR['speed'], self.max_speed.value() / 1000.0),          # mm/s -> m/s
+            (ADDR['acceleration'], self.max_acc.value()),              # already m/s^2
+            (ADDR['limit'], self.max_magnitude.value() / 1000.0),      # mm -> m
+            (ADDR['magnitude'], self.mag1.value() / 1000.0),           # mm -> m
+            (ADDR['threshold'], self.threshold.value() * deg2rad),     # deg -> rad
+            (ADDR['balancePos'], self.balance_pos.value() * deg2rad),  # deg -> rad
+            (ADDR['loopImpulse1'], self.first_impulse.value() / 1000.0),
+            (ADDR['loopImpulse2'], self.second_impulse.value() / 1000.0),
+            (ADDR['loopAngle'], self.angle_2nd_impulse.value() * deg2rad),
+        ]
+        try:
+            for addr, value in params:
+                self.serial.send_float(addr, value)
+            self.tx_label.setText(f'TX: sent {len(params)} parameters')
+        except Exception as e:
+            self.tx_label.setText(f'TX: parameter send failed - {e}')
+
+    def _set_mode(self, mode, name):
+        if not self._require_serial():
+            return
+        try:
+            self.serial.set_move_mode(mode)
+            self.tx_label.setText(f'TX: mode -> {name}')
+        except Exception as e:
+            self.tx_label.setText(f'TX: mode send failed - {e}')
 
     def on_start(self):
-        if self.serial:
-            try: self.serial.set_move_mode(1)
-            except Exception as e: print('send error', e)
+        # Push parameters first: with speed/acceleration still at their 0.0f
+        # defaults the firmware would accept the mode but never move.
+        self.send_parameters()
+        self._set_mode(1, 'OSCILLATION')
 
     def on_balance(self):
-        if self.serial:
-            try: self.serial.set_move_mode(2)
-            except Exception as e: print('send error', e)
+        self._set_mode(2, 'BALANCE')
+
+    def on_inverted_balance(self):
+        self.send_parameters()
+        self._set_mode(3, 'INVERTEDBALANCE')
 
     def on_stop(self):
-        if self.serial:
-            try: self.serial.set_move_mode(0)
-            except Exception as e: print('send error', e)
+        self._set_mode(0, 'STANDBY')
 
-    def on_float(self, addr, value): pass
+    def on_reset_encoder(self):
+        """Zero the encoder at the current position (firmware cmd 0x52)."""
+        if not self._require_serial():
+            return
+        try:
+            self.serial.send_float(ADDR['resetEncoder'], 0.0)
+            self.tx_label.setText('TX: encoder zeroed at current position')
+        except Exception as e:
+            self.tx_label.setText(f'TX: encoder reset failed - {e}')
+
+    def on_float(self, addr, value):
+        # Runs on the SerialProtocol reader thread. Only store the plain
+        # floats here (GIL-atomic enough for this purpose) - the actual
+        # widget repaint happens on the GUI thread inside _advance_animation.
+        self._rx_count += 1
+        if addr == ADDR['angle']:
+            self._live_angle = value
+        elif addr == ADDR['position']:
+            self._live_position = value
 
     def send_manual_gains(self):
-        if not self.serial:
-            QtWidgets.QMessageBox.information(self, 'Serial', 'Connect to the device first.')
+        if not self._require_serial():
             return
         gains = [self.kpa_spin.value(), self.kda_spin.value(), self.kpm_spin.value(), self.kdm_spin.value()]
         addrs = [ADDR['kpa'], ADDR['kda'], ADDR['kpm'], ADDR['kdm']]
         try:
             for addr, gain in zip(addrs, gains): self.serial.send_float(addr, gain)
-        except Exception as e: QtWidgets.QMessageBox.critical(self, 'Send K error', str(e))
+            self.tx_label.setText('TX: K = ' + ', '.join(f'{g:.2f}' for g in gains))
+        except Exception as e:
+            self.tx_label.setText(f'TX: K send failed - {e}')
 
 def main():
     app = QtWidgets.QApplication(sys.argv)

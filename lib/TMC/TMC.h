@@ -48,6 +48,7 @@ class TMC {
     public:
     static uint8_t statVal;
     TMC(uint8_t sck_, uint8_t  mosi_, uint8_t  miso_, uint8_t cs_, uint8_t en_);
+    void begin(); //Configure pins and SPI; must run from setup(), not a constructor
     void setGlobalScaler(uint8_t scaler_);
     void init(float iHold_=0.05, float iRun_=0.6, float mStep_=0);
     void setCurrent(float iHold_=0.05, float iRun_=0.4);

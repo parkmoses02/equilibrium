@@ -6,21 +6,30 @@
 #include <Encoder.h>
 static Encoder* encoderInstance = nullptr;
 Encoder::Encoder(uint8_t cha_, uint8_t chb_) {
+    // Store configuration only. Touching GPIO or attaching interrupts from a
+    // global object's constructor runs before the Arduino/ESP-IDF core has
+    // finished starting, which makes attachInterrupt() fail with
+    // "GPIO ISR Service Failed To Start" and panics the board into a boot
+    // loop. The hardware setup lives in begin(), called from setup().
     cha = cha_;
     chb = chb_;
     position = 0;
     aState = LOW;
     bState = LOW;
-    pinMode(cha, INPUT_PULLUP);
-    pinMode(chb, INPUT_PULLUP);
-    attachInterrupt(digitalPinToInterrupt(cha), isrHandleInterruptA, CHANGE);
-    attachInterrupt(digitalPinToInterrupt(chb), isrHandleInterruptB, CHANGE);  
     encoderInstance = this; //Set the static instance to this object
 }
 void Encoder::begin() {
     position = 0;
     aState = LOW;
     bState = LOW;
+    // GPIO34/35 are input-only and have no internal pull-ups; the carrier
+    // board provides external ones, so request a plain INPUT here.
+    pinMode(cha, INPUT);
+    pinMode(chb, INPUT);
+    aState = digitalRead(cha);
+    bState = digitalRead(chb);
+    attachInterrupt(digitalPinToInterrupt(cha), isrHandleInterruptA, CHANGE);
+    attachInterrupt(digitalPinToInterrupt(chb), isrHandleInterruptB, CHANGE);
 }
 long Encoder::getPosition() {
     return position;

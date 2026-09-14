@@ -5,19 +5,24 @@
 #include <TMC.h>
 #include <SPI.h>
 TMC::TMC(uint8_t sck_, uint8_t  mosi_, uint8_t  miso_, uint8_t cs_, uint8_t en_) {
+    // Configuration only - see the note in Encoder.cpp. Global constructors
+    // run before the core is up, so pin/SPI setup is deferred to begin().
     cs = cs_;
     en = en_;
     sck = sck_;
     mosi = mosi_;
     miso = miso_;
+}
+void TMC::begin() {
     pinMode(cs, OUTPUT);
     pinMode(en, OUTPUT);
     digitalWrite(cs, HIGH);
-    digitalWrite(en, LOW);
+    digitalWrite(en, HIGH); // keep the driver disabled until init() configures it
     SPI.begin(sck, miso, mosi);
     SPI.setDataMode(SPI_MODE0);
 }
 void TMC::init(float iHold_, float iRun_, float mStep_) {
+  begin();
   setConfiguration(mStep_);
   setCurrent(iHold_, iRun_);
   setRampMode(0);
@@ -25,6 +30,7 @@ void TMC::init(float iHold_, float iRun_, float mStep_) {
   targetPosition(0);
   setAcceleration(2000);
   setSpeed(40000);
+  digitalWrite(en, LOW); // driver is configured now, so enable the outputs
 }
 uint8_t TMC::statVal;
 void TMC::setChopConf(uint32_t mStep_) {
@@ -43,9 +49,12 @@ void TMC::setChopConf(uint32_t mStep_) {
   transferData(instruction, value);
 }
 void TMC::setCurrent(float iHold_, float iRun_) {
-  uint32_t iH = 31/2 * iHold_;
-  uint32_t iR = 31/2 * iRun_;
-  Serial.print(iR);
+  // 31/2 was integer division (15, not 15.5), and the Serial.print() dumped
+  // ASCII into the binary telemetry stream - both removed.
+  uint32_t iH = static_cast<uint32_t>(31.0f / 2.0f * iHold_);
+  uint32_t iR = static_cast<uint32_t>(31.0f / 2.0f * iRun_);
+  if (iH > 31) iH = 31;
+  if (iR > 31) iR = 31;
   uint32_t delay = 6;
   uint32_t value = iH | iR << 8 | delay << 16;
   uint8_t instruction = IHOLD_IRUN | WRITE;
