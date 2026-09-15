@@ -20,12 +20,11 @@
 *  SD_MODE=0 에서 VMAX 를 SPI 로 덮어쓰는 것과 구조적으로 동일하다.
 *
 *  ※ SD_MODE = 0 보드(TMC5160_BOB 등)로 교체하면 이 클래스는 필요 없다.
-*     include/MyData.h 의 USE_STEPDIR_BACKEND 를 0 으로 바꾸면 부모 클래스
-*     TMC(칩 내장 램프)로 즉시 되돌아간다. 다른 코드는 손댈 필요 없다.
+*     칩 내장 램프를 쓰는 원본 구현은 magdi 브랜치에 있다.
 *
-*  단위: 부모 TMC 와 완전히 동일한 "TMC5160 내부 단위"를 받아 내부에서 물리
-*  단위로 환산한다. 따라서 Pendulum.cpp 의 speedRatio/accelerationRatio 와
-*  LQR 게인, 캘리브레이션 값을 한 줄도 고치지 않아도 된다.
+*  단위: 지령은 "TMC5160 내부 단위"로 받아 내부에서 물리 단위로 환산한다.
+*  따라서 Pendulum.cpp 의 speedRatio/accelerationRatio 와 LQR 게인,
+*  캘리브레이션 값을 한 줄도 고치지 않아도 된다.
 * ===========================================================================
 */
 #include <TMC.h>

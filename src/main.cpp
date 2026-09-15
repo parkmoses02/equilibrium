@@ -12,7 +12,7 @@ Encoder encoder(CHA, CHB);                 // Create encoder object
 
 // 이 브랜치는 STEP/DIR (SD_MODE = 1) 전용이다.
 // BIGTREETECH TMC5160T Pro 등 SD_MODE 가 기판에서 HIGH 로 묶인 보드를 쓴다.
-// 칩 내장 램프 백엔드(TMC, SD_MODE = 0)는 magdi 브랜치에 있다.
+// 칩 내장 램프 백엔드(SD_MODE = 0)는 magdi 브랜치에 있다.
 TMCStepDir tmcBackend(SCK, MOSI, MISO, CS, EN, TMC_STEP, TMC_DIR);
 // Pendulum.cpp 는 TMC& 로만 다루므로 백엔드 종류를 신경쓰지 않는다.
 TMC &tmc = tmcBackend;
