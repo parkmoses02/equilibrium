@@ -10,15 +10,11 @@
 
 Encoder encoder(CHA, CHB);                 // Create encoder object
 
-// 백엔드는 MyData.h 의 USE_STEPDIR_BACKEND 로 고른다. 아래 tmc 는 어느 쪽이든
-// TMC& 로 쓰이므로, 이 파일의 나머지와 Pendulum.cpp 는 백엔드를 신경쓰지 않는다.
-#if USE_STEPDIR_BACKEND
-// SD_MODE = 1 보드 (BIGTREETECH TMC5160T Pro 등): STEP/DIR + 소프트웨어 램프
+// 이 브랜치는 STEP/DIR (SD_MODE = 1) 전용이다.
+// BIGTREETECH TMC5160T Pro 등 SD_MODE 가 기판에서 HIGH 로 묶인 보드를 쓴다.
+// 칩 내장 램프 백엔드(TMC, SD_MODE = 0)는 magdi 브랜치에 있다.
 TMCStepDir tmcBackend(SCK, MOSI, MISO, CS, EN, TMC_STEP, TMC_DIR);
-#else
-// SD_MODE = 0 보드 (TMC5160_BOB 등): 칩 내장 모션 컨트롤러
-TMC tmcBackend(SCK, MOSI, MISO, CS, EN);
-#endif
+// Pendulum.cpp 는 TMC& 로만 다루므로 백엔드 종류를 신경쓰지 않는다.
 TMC &tmc = tmcBackend;
 // 600-PPR encoder read on both edges of both channels -> 2400 counts/rev.
 // (The reference code used 10000; that is a different encoder.)

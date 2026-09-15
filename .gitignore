@@ -10,3 +10,4 @@ src/tests/logs/
 # submodules ("does not have a commit checked out").
 .history/
 *.kicad_prl
+__pycache__/
