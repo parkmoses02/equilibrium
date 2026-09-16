@@ -11,7 +11,7 @@ constexpr float TIP_DISTANCE_RATIO = 0.95f;
 
 // Start bench tests at 0.5 m/s^2 and raise this gradually after direction and
 // rail-limit checks. 2.0 m/s^2 is the intended initial tuning ceiling.
-constexpr float SWING_ACCEL_MAX_MPS2 = 2.0f;
+constexpr float SWING_ACCEL_MAX_MPS2 = 0.5f;
 constexpr float CART_CENTER_KP = 4.0f;
 constexpr float CART_CENTER_KD = 2.5f;
 constexpr float FALLBACK_RAIL_LIMIT_M = 0.30f;
