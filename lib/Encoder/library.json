@@ -1,0 +1,12 @@
+{
+  "name": "Encoder",
+  "version": "1.0.0",
+  "date": "2025-07-20",
+  "description": "Library for controlling 2 channels rotary encoder with interrupts",
+  "authors": [
+    {
+      "name": "Magdi Laoun",
+      "email": "magdi.laoun@gmail.com"
+    }
+  ]
+}

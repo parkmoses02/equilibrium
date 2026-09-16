@@ -1,0 +1,12 @@
+{
+  "name": "TMC",
+  "version": "1.0.0",
+  "date": "2025-07-19",
+  "description": "Library for controlling TMC stepper motor drivers",
+  "authors": [
+    {
+      "name": "Magdi Laoun",
+      "email": "magdi.laoun@gmail.com"
+    }
+  ]
+}

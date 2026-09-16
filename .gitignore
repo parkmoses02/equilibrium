@@ -1,0 +1,16 @@
+.DS_Store
+__pycache__/
+*.py[cod]
+
+.pio
+src/tests/logs/
+.vscode/.browse.c_cpp.db*
+.vscode/c_cpp_properties.json
+.vscode/launch.json
+.vscode/ipch
+
+# KiCad Local History directories contain their own internal Git repositories.
+# Ignore them at every nesting level so `git add` does not treat them as broken
+# submodules ("does not have a commit checked out").
+.history/
+*.kicad_prl
