@@ -17,6 +17,7 @@
 //          카트를 레일 가운데 두고 누른다. 한쪽(SWING_START_OFFSET)으로 천천히 간 뒤 반대쪽으로
 //          훅 가로지르며 올린다. VM 24~36V 필요 (12V 에선 1.2 m/s 에서 탈조).
 //   8) T - 스윙 속도/가속도로 0.15 m 훅 갔다가 천천히 복귀. 출발 표시로 안 돌아오면 탈조.
+//   9) D - 기존 빠른 밸런스(STIFF, 기본) / 시연용 느린 밸런스(SOFT) 토글. 밸런싱 중에도 된다.
 // 각도 22도 초과 또는 카트 350mm 리밋 초과 시 자동 disarm.
 // 밸런싱 포기(disarm) 시점까지의 로그는 이 firmware가 아니라
 // src/tests/monitor_and_log.py 를 시리얼 모니터 대신 실행해서 저장한다
@@ -85,6 +86,17 @@ constexpr uint32_t REPORT_PERIOD_MS = 100;
 //   (gKcartPos, gKcartVel) = (6, 7) -> 주기 4.1 s,  (12, 10) -> 주기 2.4 s
 constexpr float gKangle = 50.0f;
 constexpr float gKrate = 8.0f;
+// 시연용 느린 진자 루프 (D 로 토글, 부팅 시엔 꺼져 있음). 위 (50, 8) 은 진자를
+// 건드려도 기울기가 눈에 보이기 전에 카트가 받아 버려서, 보는 사람에겐 세워진
+// 막대를 끌고 다니는 것처럼 보인다. 게인을 낮추면 진자가 눈에 보일 만큼
+// 기울었다가 카트가 쫓아가 세우는 모습이 된다. 선형 모델 시뮬(1 rad/s 톡 치기,
+// L = 0.133~0.2 m) 기준 최대 기울기:
+//   (50, 8) 1.0~1.5deg   (30, 4) 2.0~3.5deg   (28, 3) 2.6~4.9deg
+// (28, 3) 보다 더 내리면 L = 0.2 m 쪽 감쇠비가 0.3 아래로 떨어져, 실제 모터
+// 지연까지 더해지면 진자가 1~1.5 Hz 로 흔들리다 넘어질 수 있다.
+// 흔들림이 보이면 gKrateSoft 부터 올린다.
+constexpr float gKangleSoft = 15.0f;
+constexpr float gKrateSoft = 2.0f;
 constexpr float gKcartPos = 3.0f;
 constexpr float gKcartVel = 5.0f;
 // 업라이트 기준각 보정 [rad]. 진자 무게중심/인코더 장착 오차로 '수직'이
@@ -205,6 +217,7 @@ uint32_t swingStartMs = 0;
 uint32_t phaseStartMs = 0;
 uint32_t relaxedTripUntilMs = 0;
 uint32_t catchMs = 0;
+bool softBalance = false; // D 로 토글: 시연용 느린 진자 게인 (기본은 기존 게인)
 
 bool measuring = false;
 int8_t measureSide = 0;
@@ -757,8 +770,12 @@ void updateController()
             : min(1.0f, (sinceCatchMs - CATCH_STIFF_MS) / static_cast<float>(CATCH_BLEND_MS));
     const float kCartPos = CATCH_KCARTPOS + (gKcartPos - CATCH_KCARTPOS) * blend;
     const float kCartVel = CATCH_KCARTVEL + (gKcartVel - CATCH_KCARTVEL) * blend;
+    // 캐치 직후엔 진자가 크게 흔들리므로 시연 모드여도 빠른 진자 게인으로 잡고,
+    // 카트 게인과 같은 blend 로 느린 게인으로 넘어간다. A 로 arm 하면 blend = 1.
+    const float kAngle = softBalance ? gKangle + (gKangleSoft - gKangle) * blend : gKangle;
+    const float kRate = softBalance ? gKrate + (gKrateSoft - gKrate) * blend : gKrate;
     float acceleration =
-        controlPolarity * (gKangle * (angle - angleTrim) + gKrate * angularRate) +
+        controlPolarity * (kAngle * (angle - angleTrim) + kRate * angularRate) +
         cartFeedbackSign * (kCartPos * cartPosition + kCartVel * commandedVelocity);
     acceleration = constrain(acceleration,
                              -MAX_CART_ACCEL_MPS2,
@@ -771,9 +788,12 @@ void updateController()
 
 void printGains()
 {
-    Serial.printf("GAINS angle=%.2f rate=%.2f cartPos=%.2f cartVel=%.2f "
+    Serial.printf("GAINS %s angle=%.2f rate=%.2f cartPos=%.2f cartVel=%.2f "
                   "trim=%+.2fdeg pol=%d cartSign=%d L=%.3fm\n",
-                  gKangle, gKrate, gKcartPos, gKcartVel,
+                  softBalance ? "SOFT" : "STIFF",
+                  softBalance ? gKangleSoft : gKangle,
+                  softBalance ? gKrateSoft : gKrate,
+                  gKcartPos, gKcartVel,
                   angleTrim * 180.0f / PI, controlPolarity, cartFeedbackSign,
                   pendulumLengthM);
 }
@@ -783,7 +803,8 @@ void printHelp()
     Serial.println("Commands: Z=zero while hanging DOWN, A=arm while held UP,");
     Serial.println("          S=swing up from hanging still, M=measure pendulum length,");
     Serial.println("          T=fast motion test (cart must return to its start mark),");
-    Serial.println("          X=disarm, P=flip angle polarity (disarmed only), H=help");
+    Serial.println("          X=disarm, P=flip angle polarity (disarmed only), H=help,");
+    Serial.println("          D=toggle SOFT (visible, demo) / STIFF balance gains");
     Serial.println("Gains are compile-time constants: edit the top of this file,");
     Serial.println("then rebuild and reflash. Current build:");
     printGains();
@@ -838,6 +859,12 @@ void handleSerial()
                 controlPolarity = -controlPolarity;
                 Serial.printf("Feedback polarity is now %d.\n", controlPolarity);
             }
+        }
+        else if (command == 'd' || command == 'D')
+        {
+            // 밸런싱 중에도 바로 바뀐다 (진자 게인만 바뀌므로 카트가 튀지 않는다).
+            softBalance = !softBalance;
+            printGains();
         }
         else if (command == 'h' || command == 'H')
         {
