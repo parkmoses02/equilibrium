@@ -1,7 +1,7 @@
 """upright_balance_test.cpp용 시리얼 모니터 + 세션 로그 저장 스크립트.
 
 기존 PlatformIO 시리얼 모니터를 대신해서 이 스크립트를 실행하면:
-  - z/a/x/p/h 명령어 입력은 그대로 보드로 전달되고,
+  - 명령 키(z/a/s/m/t/x/p/h)는 Windows 에선 누르는 즉시(Enter 없이) 보드로 전달되고,
   - 보드가 출력하는 모든 줄이 콘솔에 그대로 표시되며,
   - "ARMED: ..." 부터 "DISARMED: ..." 까지 한 번의 밸런싱 시도(세션) 로그가
     src/tests/logs/ 에 자동으로 저장된다.
@@ -65,12 +65,27 @@ def main():
     ser = serial.Serial(args.port, args.baud, timeout=1)
     threading.Thread(target=reader_thread, args=(ser,), daemon=True).start()
 
-    print(f"Connected to {args.port} @ {args.baud}. z/a/x/p/h + Enter to send. Ctrl+C to quit.")
     try:
-        while True:
-            command = input()
-            if command:
-                ser.write(command.encode())
+        import msvcrt  # Windows: 키를 누르는 즉시 보낸다 (X 비상정지에 Enter 불필요)
+    except ImportError:
+        msvcrt = None
+
+    try:
+        if msvcrt:
+            print(f"Connected to {args.port} @ {args.baud}. Keys are sent immediately "
+                  "(x/space = stop). Ctrl+C to quit.")
+            while True:
+                key = msvcrt.getwch()
+                if key == "\x03":
+                    break
+                if key.isascii() and key.isprintable():
+                    ser.write(key.encode())
+        else:
+            print(f"Connected to {args.port} @ {args.baud}. command + Enter to send. Ctrl+C to quit.")
+            while True:
+                command = input()
+                if command:
+                    ser.write(command.encode())
     except (KeyboardInterrupt, EOFError):
         pass
     finally:
