@@ -16,7 +16,7 @@ constexpr uint32_t MOVE_TIME_MS = 1000;
 constexpr uint32_t RAMP_TIME_MS = 250;
 constexpr uint32_t PAUSE_TIME_MS = 500;
 constexpr uint32_t START_STEP_PERIOD_US = 4000; // 250 microsteps/s
-constexpr uint32_t FAST_STEP_PERIOD_US = 50; // 20000 microsteps/s
+constexpr uint32_t FAST_STEP_PERIOD_US = 50;    // 20000 microsteps/s
 
 constexpr uint8_t REG_GCONF = 0x00;
 constexpr uint8_t REG_IOIN = 0x04;
@@ -28,7 +28,8 @@ constexpr uint8_t WRITE_FLAG = 0x80;
 
 SPISettings tmcSpi(1000000, MSBFIRST, SPI_MODE3);
 
-void writeRegister(uint8_t address, uint32_t value) {
+void writeRegister(uint8_t address, uint32_t value)
+{
     SPI.beginTransaction(tmcSpi);
     digitalWrite(PIN_TMC_CS, LOW);
     SPI.transfer(address | WRITE_FLAG);
@@ -40,12 +41,14 @@ void writeRegister(uint8_t address, uint32_t value) {
     SPI.endTransaction();
 }
 
-uint32_t readRegister(uint8_t address) {
+uint32_t readRegister(uint8_t address)
+{
     // The TMC5160 returns the requested register on the next transaction.
     SPI.beginTransaction(tmcSpi);
     digitalWrite(PIN_TMC_CS, LOW);
     SPI.transfer(address & 0x7F);
-    for (uint8_t i = 0; i < 4; ++i) SPI.transfer(0);
+    for (uint8_t i = 0; i < 4; ++i)
+        SPI.transfer(0);
     digitalWrite(PIN_TMC_CS, HIGH);
     SPI.endTransaction();
 
@@ -61,14 +64,17 @@ uint32_t readRegister(uint8_t address) {
     return value;
 }
 
-[[noreturn]] void stopWithError(const char *message) {
+[[noreturn]] void stopWithError(const char *message)
+{
     digitalWrite(PIN_TMC_EN, HIGH);
     Serial.println(message);
     Serial.println("Driver remains DISABLED. Remove VM power before checking wiring.");
-    while (true) delay(1000);
+    while (true)
+        delay(1000);
 }
 
-void configureDriver() {
+void configureDriver()
+{
     writeRegister(REG_GCONF, 0x00000000);
 
     // Restored to the last known-working current setting. The actual phase
@@ -84,24 +90,29 @@ void configureDriver() {
     writeRegister(REG_CHOPCONF, chopconf);
 }
 
-void moveForOneSecond(bool direction) {
+void moveForOneSecond(bool direction)
+{
     digitalWrite(PIN_TMC_DIR, direction ? HIGH : LOW);
     delayMicroseconds(20);
 
     const uint32_t startedAt = millis();
-    while (millis() - startedAt < MOVE_TIME_MS) {
+    while (millis() - startedAt < MOVE_TIME_MS)
+    {
         const uint32_t elapsed = millis() - startedAt;
         uint32_t stepPeriodUs = FAST_STEP_PERIOD_US;
 
-        if (elapsed < RAMP_TIME_MS) {
+        if (elapsed < RAMP_TIME_MS)
+        {
             stepPeriodUs = START_STEP_PERIOD_US -
-                ((START_STEP_PERIOD_US - FAST_STEP_PERIOD_US) * elapsed /
-                 RAMP_TIME_MS);
-        } else if (elapsed > MOVE_TIME_MS - RAMP_TIME_MS) {
+                           ((START_STEP_PERIOD_US - FAST_STEP_PERIOD_US) * elapsed /
+                            RAMP_TIME_MS);
+        }
+        else if (elapsed > MOVE_TIME_MS - RAMP_TIME_MS)
+        {
             const uint32_t rampElapsed = elapsed - (MOVE_TIME_MS - RAMP_TIME_MS);
             stepPeriodUs = FAST_STEP_PERIOD_US +
-                ((START_STEP_PERIOD_US - FAST_STEP_PERIOD_US) * rampElapsed /
-                 RAMP_TIME_MS);
+                           ((START_STEP_PERIOD_US - FAST_STEP_PERIOD_US) * rampElapsed /
+                            RAMP_TIME_MS);
         }
 
         digitalWrite(PIN_TMC_STEP, HIGH);
@@ -111,7 +122,8 @@ void moveForOneSecond(bool direction) {
     }
 }
 
-void setup() {
+void setup()
+{
     pinMode(PIN_TMC_EN, OUTPUT);
     pinMode(PIN_TMC_STEP, OUTPUT);
     pinMode(PIN_TMC_DIR, OUTPUT);
@@ -134,7 +146,8 @@ void setup() {
     const uint32_t ioin = readRegister(REG_IOIN);
     const uint8_t version = static_cast<uint8_t>(ioin >> 24);
     Serial.printf("IOIN=0x%08lX, VERSION=0x%02X\n", ioin, version);
-    if (version != 0x30) {
+    if (version != 0x30)
+    {
         stopWithError("ERROR: TMC5160 SPI response is invalid.");
     }
 
@@ -143,7 +156,8 @@ void setup() {
     Serial.println("Driver enabled: restored current, ramped to 5000 microsteps/s.");
 }
 
-void loop() {
+void loop()
+{
     Serial.println("Direction A: 1 second");
     moveForOneSecond(false);
     delay(PAUSE_TIME_MS);

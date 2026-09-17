@@ -76,21 +76,41 @@ def dare_lqr(Ad, Bd, Q, R, max_iters=50000, tol=1e-9):
     return P, np.atleast_2d(K)
 
 
-def simulate(Ad, Bd, K, x0_rad, steps, u_limit=4000.0):
-    """이산 시간 시스템 시뮬레이션"""
+def simulate(Ad, Bd, K, x0_rad, steps, u_limit=4000.0, v_limit=None, return_u=False):
+    """이산 시간 시스템 시뮬레이션
+
+    펌웨어(upright_balance_test.cpp updateController)와 같은 순서로 제한한다:
+      1) 가속도 지령을 ±u_limit 로 자른다.
+      2) 속도를 적분한 뒤 ±v_limit 로 자른다.
+    속도가 잘리면 카트가 실제로 낸 가속도도 그만큼 줄어들고, 진자는 그 줄어든
+    가속도를 느낀다. 그래서 x 갱신에는 잘린 속도에서 역산한 가속도를 쓴다.
+    v_limit 을 쓰려면 상태 x[3] 이 카트 속도이고 Bd[3] = dt 여야 한다.
+
+    return_u=True 면 (traj, u_applied) 를 돌려준다.
+    """
     x = np.array(x0_rad, dtype=float).reshape(-1, 1)
     n = x.shape[0]
     traj = np.zeros((steps, n))
-    
+    u_applied = np.zeros(steps)
+    dt_v = float(Bd[3, 0])
+
     for k in range(steps):
         traj[k, :] = x.flatten()
         u = float(-(K @ x).item())
-        
+
         if u_limit is not None:
             u = float(np.clip(u, -abs(u_limit), abs(u_limit)))
-            
+
+        if v_limit is not None and dt_v > 0.0:
+            v = float(x[3, 0])
+            v_next = float(np.clip(v + dt_v * u, -abs(v_limit), abs(v_limit)))
+            u = (v_next - v) / dt_v
+
+        u_applied[k] = u
         x = Ad @ x + Bd * u
-        
+
+    if return_u:
+        return traj, u_applied
     return traj
 
 
@@ -100,7 +120,7 @@ def simulate(Ad, Bd, K, x0_rad, steps, u_limit=4000.0):
 if __name__ == "__main__":
     # 1. 하드웨어 세팅 및 모델 생성
     dt = 0.001
-    Ac, Bc = model_matrices(length_mm=305.0, friction=0.04, g=9.81)
+    Ac, Bc = model_matrices(length_mm=200.0, friction=0.04, g=9.81)
     Ad, Bd = discretize(Ac, Bc, dt)
 
     # 2. LQR 가중치 설정 (Q, R)

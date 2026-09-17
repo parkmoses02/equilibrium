@@ -75,10 +75,9 @@ class PendulumWidget(QtWidgets.QWidget):
 class OptimizeWorker(QtCore.QThread):
     """K 4개를 Nelder-Mead로 직접 탐색하는 백그라운드 스레드."""
     finished = QtCore.pyqtSignal(dict)   # 최종 best 결과 emit
- 
     def __init__(self, Ad, Bd, x0, steps, dt,
-                 lim_acc, lim_pos, lim_vel,
-                 Q_ui, r_ui, init_k, parent=None):
+                lim_acc, lim_pos, lim_vel,
+                Q_ui, r_ui, init_k, parent=None):
         super().__init__(parent)
         self.Ad, self.Bd         = Ad, Bd
         self.x0                  = x0
@@ -339,6 +338,9 @@ class MainWindow(QtWidgets.QMainWindow):
         lsim.addRow('Gravity [m/s^2]', self.sim_g); lsim.addRow('Friction coefficient []', self.sim_friction)
         lsim.addRow('Length of pendulum [mm]', self.sim_l); lsim.addRow('Time step [s]', self.sim_dt)
         lsim.addRow('Step Counts', self.sim_steps); lsim.addRow('Initial angle [degree]', self.initial_angle)
+        # 켜면 Limits parameters 의 Max acceleration / Max speed 를 펌웨어처럼 적용한다.
+        self.sim_apply_limits = QtWidgets.QCheckBox('Apply accel/speed limits'); self.sim_apply_limits.setChecked(True)
+        lsim.addRow(self.sim_apply_limits)
         grp_sim.setLayout(lsim)
         mid_layout.addWidget(grp_sim)
 
@@ -459,6 +461,9 @@ class MainWindow(QtWidgets.QMainWindow):
         self.sim_dt.valueChanged.connect(lambda val: self.run_simulation())
         self.sim_steps.valueChanged.connect(lambda val: self.run_simulation())
         self.initial_angle.valueChanged.connect(lambda val: self.run_simulation())
+        self.sim_apply_limits.toggled.connect(lambda val: self.run_simulation())
+        self.max_acc.valueChanged.connect(lambda val: self.run_simulation())
+        self.max_speed.valueChanged.connect(lambda val: self.run_simulation())
         self.q0.valueChanged.connect(lambda val: self.run_simulation())
         self.q1.valueChanged.connect(lambda val: self.run_simulation())
         self.q2.valueChanged.connect(lambda val: self.run_simulation())
@@ -531,14 +536,19 @@ class MainWindow(QtWidgets.QMainWindow):
         ia_rad = ia_deg * math.pi / 180.0
         x0 = [ia_rad, 0.0, 0.0, 0.0]
         
-        # ★ 롤백됨: 시뮬레이터 자체는 한계를 적용하지 않은 '이상적(4000.0)' 상태로 궤적을 생성합니다.
-        traj = simulator.simulate(Ad, Bd, -k_use, x0, steps, u_limit=4000.0)
+        # 체크박스가 켜져 있으면 펌웨어처럼 가속도/속도를 잘라서 궤적을 만든다.
+        # u_array 는 제한 후 카트가 실제로 낸 가속도다.
+        if self.sim_apply_limits.isChecked():
+            u_lim = float(self.max_acc.value())
+            v_lim = float(self.max_speed.value()) / 1000.0
+        else:
+            u_lim, v_lim = 4000.0, None
+        traj, u_array = simulator.simulate(Ad, Bd, -k_use, x0, steps,
+                                           u_limit=u_lim, v_limit=v_lim, return_u=True)
 
         angle_deg = 180.0 + traj[:, 0] * 180.0 / math.pi
         pos_mm = traj[:, 2] * 1000.0
         vel_mm = traj[:, 3] * 1000.0
-        
-        u_array = np.dot(traj, k_use.flatten()) 
         t_ms = np.arange(len(angle_deg), dtype=float) * dt * 1000.0
 
         self.sim_angle_curve.setData(t_ms, angle_deg)
@@ -572,7 +582,7 @@ class MainWindow(QtWidgets.QMainWindow):
             self.plot_vel.setYRange(-max(vel_limit, abs(v_min), abs(v_max)) * 1.15, max(vel_limit, abs(v_min), abs(v_max)) * 1.15)
             self.plot_acc.setYRange(-max(max_acc, abs(u_min), abs(u_max)) * 1.15, max(max_acc, abs(u_min), abs(u_max)) * 1.15)
 
-        # ★ 롤백됨: Riccati 계산에도 클리핑을 제거하여 '이상적 비용 점수'를 표기합니다.
+        # 비용 J = ∫(xᵀQx + r·u²)dt. 위 궤적(제한 적용 여부 포함)과 실제 u 로 계산한다.
         Q = np.diag([float(self.q0.value()), float(self.q1.value()), float(self.q2.value()), float(self.q3.value())])
         R_val = float(self.r1.value())
         
