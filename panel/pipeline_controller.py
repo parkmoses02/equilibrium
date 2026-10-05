@@ -18,6 +18,30 @@ except ImportError:
     import simulator
 
 
+class PipelineSerial(SerialProtocol):
+    """SerialProtocol with the pipeline firmware's PC -> ESP32 framing.
+
+    pipeline_energy_lqr.cpp expects every command as a 6-byte frame
+        [0xAA][addr][4 payload bytes]
+    (same 0xAA header as its telemetry). Without the header, addresses 0x20 (' ') and 0x50
+    ('P') collide with the firmware's ASCII commands (disarm / flip polarity) and corrupt
+    the stream. The base class is left untouched because panel.py / main.cpp still use the
+    5-byte header-less format.
+    """
+    HEADER = 0xAA
+
+    def send_float(self, addr, value):
+        if not self.ser or not self.ser.is_open:
+            raise RuntimeError('Serial port not open')
+        self.ser.write(bytes([self.HEADER, addr & 0xFF]) + struct.pack('<f', float(value)))
+
+    def set_move_mode(self, mode):
+        if not self.ser or not self.ser.is_open:
+            raise RuntimeError('Serial port not open')
+        # 0x50 = mode command, payload[0] = mode byte (0 safe, 1 swing, 2 balance)
+        self.ser.write(bytes([self.HEADER, 0x50, int(mode) & 0xFF, 0, 0, 0]))
+
+
 # ==============================================================================
 # 1. Riccati LQR Solver & Full Nonlinear Simulation Engine
 # ==============================================================================
@@ -518,6 +542,22 @@ class PipelineMainWindow(QtWidgets.QMainWindow):
         l_lqr.addRow('Manual kCartPos:', self.spin_kP)
         l_lqr.addRow('Manual kCartVel:', self.spin_kV)
         self.chk_manual_gains.toggled.connect(self._refresh_gain_label)
+
+        # Soft (demo) balance = firmware 'D' toggle: lower pendulum-loop gains so the tilt is
+        # visible before the cart catches it. Applies on top of whichever gains were sent.
+        self.chk_soft_balance = QtWidgets.QCheckBox('Soft balance (demo gains, same as D)')
+        self.chk_soft_balance.setToolTip(
+            "ESP32 의 D 토글과 같은 기능. 밸런싱 중에도 즉시 적용되며(카트는 튀지 않음) 체크 시 연결돼 있으면 바로 전송합니다.\n"
+            "캐치 직후에는 원래 게인을 쓰다가 서서히 아래 soft 게인으로 넘어갑니다.\n"
+            "너무 낮추면(약 28/3 미만) 진자가 1~1.5Hz로 흔들리다 넘어질 수 있습니다. 흔들리면 kRate 부터 올리세요.")
+        l_lqr.addRow(self.chk_soft_balance)
+        self.spin_kAS = QtWidgets.QDoubleSpinBox()   # gKangleSoft (0x24)
+        self.spin_kRS = QtWidgets.QDoubleSpinBox()   # gKrateSoft  (0x25)
+        for sp, v in ((self.spin_kAS, 15.0), (self.spin_kRS, 2.0)):
+            sp.setRange(0.0, 500.0); sp.setDecimals(2); sp.setValue(v)
+        l_lqr.addRow('Soft kAngle:', self.spin_kAS)
+        l_lqr.addRow('Soft kRate:', self.spin_kRS)
+        self.chk_soft_balance.toggled.connect(self._send_soft_state)
         left_layout.addWidget(grp_lqr)
 
         # 3. Kinematic Limits & Energy Parameters
@@ -767,7 +807,7 @@ class PipelineMainWindow(QtWidgets.QMainWindow):
         if self.serial is None:
             port = self.port_edit.text().strip()
             try:
-                self.serial = SerialProtocol(port, 115200, callback=self._on_packet_received)
+                self.serial = PipelineSerial(port, 115200, callback=self._on_packet_received)
                 self.serial.open()
                 self.connect_btn.setText('Disconnect')
                 self.connect_btn.setObjectName("dangerBtn")
@@ -806,9 +846,19 @@ class PipelineMainWindow(QtWidgets.QMainWindow):
         addrs = [0x20, 0x21, 0x22, 0x23]
         for a, v in zip(addrs, fw_gains):
             self.serial.send_float(a, float(v))
+        self._send_soft_state()
         self.status_label.setText(
             f"TX: {source} gains -> ESP32: "
-            f"[{fw_gains[0]:.2f}, {fw_gains[1]:.2f}, {fw_gains[2]:.2f}, {fw_gains[3]:.2f}]")
+            f"[{fw_gains[0]:.2f}, {fw_gains[1]:.2f}, {fw_gains[2]:.2f}, {fw_gains[3]:.2f}]"
+            f"  soft={'ON' if self.chk_soft_balance.isChecked() else 'off'}")
+
+    def _send_soft_state(self, *_):
+        """Send soft-balance gains (0x24/0x25) and on/off (0x26). No-op when offline."""
+        if not self.serial:
+            return
+        self.serial.send_float(0x24, float(self.spin_kAS.value()))
+        self.serial.send_float(0x25, float(self.spin_kRS.value()))
+        self.serial.send_float(0x26, 1.0 if self.chk_soft_balance.isChecked() else 0.0)
 
     def _send_limits_to_firmware(self):
         if not self.serial:

@@ -21,8 +21,12 @@
  *    - Gains K = [k_angle, k_rate, k_cartPos, k_cartVel] can be calculated via Riccati (DARE)
  *      on the PC panel and received over serial in real time, or use default calibrated gains.
  * 5. Serial Protocol:
- *    - Compatible with PC serial packet protocol (0xAA header for telemetry, 5-byte param packets).
- *    - Also accepts ASCII serial commands for testing (Z, A, S, X, etc.).
+ *    - ESP32 -> PC telemetry: 0xAA + addr + float32 (6 bytes).
+ *    - PC -> ESP32 commands use the SAME framing: 0xAA + addr + 4 payload bytes (6 bytes).
+ *      The header keeps binary frames unambiguous against the single-character ASCII
+ *      commands (address 0x20 is ' ' = disarm and 0x50 is 'P' = flip polarity, which
+ *      used to be misread as ASCII and desynchronised the stream).
+ *    - Also accepts ASCII serial commands for testing (Z, A, S, X, P, D).
  */
 
 // --- Pin Map (ESP32 WROOM + carrier Rev.J) ---
@@ -79,6 +83,14 @@ float gKcartPos = 3.0f;    // [1/s^2]
 float gKcartVel = 5.0f;    // [1/s]
 float gAngleTrim = 0.0f;   // [rad]
 float gPendulumLengthM = 0.20f; // [m]
+
+// Soft (demo) balance gains, toggled with 'D' (ported from upright_balance_test.cpp).
+// Lower pendulum-loop gains make the tilt visible before the cart catches it. Below roughly
+// (28, 3) the damping ratio at L = 0.2 m gets small and, with real motor lag, the pendulum can
+// oscillate at 1~1.5 Hz and fall. If it wobbles, raise gKrateSoft first.
+float gKangleSoft = 15.0f; // [m/rad/s^2]
+float gKrateSoft  = 2.0f;  // [m/rad/s]
+bool softBalance = false;  // off at boot
 
 int8_t controlPolarity = -1; // Polarity verified on assembled hardware
 constexpr int8_t cartFeedbackSign = 1;
@@ -455,8 +467,14 @@ void updatePipelineController() {
     const float kCartPos = CATCH_KCARTPOS + (gKcartPos - CATCH_KCARTPOS) * blend;
     const float kCartVel = CATCH_KCARTVEL + (gKcartVel - CATCH_KCARTVEL) * blend;
 
+    // Right after a catch the pendulum still swings a lot, so even in soft mode the stiff
+    // pendulum gains are used and then blended to the soft ones with the same blend as the
+    // cart gains. Arming with 'A' gives blend = 1.
+    const float kAngle = softBalance ? gKangle + (gKangleSoft - gKangle) * blend : gKangle;
+    const float kRate  = softBalance ? gKrate  + (gKrateSoft  - gKrate)  * blend : gKrate;
+
     // Riccati acceleration control law
-    float u = controlPolarity * (gKangle * (angle - gAngleTrim) + gKrate * angularRate) +
+    float u = controlPolarity * (kAngle * (angle - gAngleTrim) + kRate * angularRate) +
               cartFeedbackSign * (kCartPos * cartPosition + kCartVel * commandedVelocity);
 
     // Apply Acceleration Limit
@@ -502,11 +520,77 @@ void transmitTelemetry() {
 }
 
 // --- Packet & Command Receiver ---
+constexpr uint8_t PKT_HEADER = 0xAA;
+constexpr uint32_t PKT_PARTIAL_TIMEOUT_MS = 20;
+
+void printGains() {
+    Serial.printf("GAINS %s angle=%.2f rate=%.2f cartPos=%.2f cartVel=%.2f trim=%+.2fdeg pol=%d L=%.3fm\n",
+                  softBalance ? "SOFT" : "STIFF",
+                  softBalance ? gKangleSoft : gKangle,
+                  softBalance ? gKrateSoft : gKrate,
+                  gKcartPos, gKcartVel,
+                  gAngleTrim * 180.0f / PI, controlPolarity, gPendulumLengthM);
+}
+
+// One complete PC -> ESP32 frame: [0xAA][addr][payload x4]. For floats the payload is a
+// little-endian float32; for the mode command (0x50) payload[0] is the mode byte.
+void applyFrame(const uint8_t* f) {
+    const uint8_t addr = f[1];
+    float val;
+    memcpy(&val, &f[2], sizeof(float));
+
+    switch (addr) {
+        case 0x01: gMaxCartSpeed = val; break;
+        case 0x02: gMaxCartAccel = val; break;
+        case 0x07: gCartSoftLimit = val; break;
+        case 0x0B: gPendulumLengthM = val; break;
+        case 0x0C: gSwingEnergyMargin = val; break;
+        case 0x20: gKangle = val; break;     // LQR K_theta
+        case 0x21: gKrate = val; break;      // LQR K_theta_dot
+        case 0x22: gKcartPos = val; break;   // LQR K_x
+        case 0x23: gKcartVel = val; break;   // LQR K_x_dot
+        case 0x24: gKangleSoft = val; break; // soft-balance K_theta
+        case 0x25: gKrateSoft = val; break;  // soft-balance K_theta_dot
+        case 0x26: softBalance = (val != 0.0f); break; // soft balance on/off (same as 'D')
+        case 0x50: {
+            const uint8_t m = f[2];
+            if (m == 0) disarm("Panel Standby");
+            else if (m == 1) startSwingUp();
+            else if (m == 2) armBalanceController();
+            break;
+        }
+        case 0x52:
+            if (armed) disarm("Zero requested");
+            zeroEncoderDownward();
+            calibrated = true;
+            break;
+        default:
+            break;
+    }
+}
+
 void handleSerial() {
+    static uint32_t partialSinceMs = 0;
     while (Serial.available() > 0) {
-        // Peek to see if packet or ASCII
-        int b = Serial.peek();
-        if (b == 'Z' || b == 'z') {
+        const int b = Serial.peek();
+        if (b == PKT_HEADER) {
+            if (Serial.available() < 6) {
+                // Wait for the rest of the frame, but never block ASCII commands forever
+                // behind a stray 0xAA.
+                if (partialSinceMs == 0) {
+                    partialSinceMs = millis();
+                } else if (millis() - partialSinceMs > PKT_PARTIAL_TIMEOUT_MS) {
+                    Serial.read();
+                    partialSinceMs = 0;
+                    continue;
+                }
+                break;
+            }
+            partialSinceMs = 0;
+            uint8_t frame[6];
+            Serial.readBytes(frame, sizeof(frame));
+            applyFrame(frame);
+        } else if (b == 'Z' || b == 'z') {
             Serial.read();
             if (armed) disarm("Zero requested");
             zeroEncoderDownward();
@@ -527,43 +611,14 @@ void handleSerial() {
                 controlPolarity = -controlPolarity;
                 Serial.printf("OK: Control polarity = %d\n", controlPolarity);
             }
+        } else if (b == 'D' || b == 'd') {
+            // Works while balancing too: only the pendulum-loop gains change, so the cart
+            // does not jump.
+            Serial.read();
+            softBalance = !softBalance;
+            printGains();
         } else {
-            // Binary 5-byte packet: [addr, float32 (little-endian)]
-            if (Serial.available() >= 5) {
-                uint8_t buf[5];
-                Serial.readBytes(buf, 5);
-                uint8_t addr = buf[0];
-                float val;
-                memcpy(&val, &buf[1], sizeof(float));
-
-                switch (addr) {
-                    case 0x01: gMaxCartSpeed = val; break;
-                    case 0x02: gMaxCartAccel = val; break;
-                    case 0x07: gCartSoftLimit = val; break;
-                    case 0x0B: gPendulumLengthM = val; break;
-                    case 0x0C: gSwingEnergyMargin = val; break;
-                    case 0x20: gKangle = val; break;     // LQR K_theta
-                    case 0x21: gKrate = val; break;      // LQR K_theta_dot
-                    case 0x22: gKcartPos = val; break;   // LQR K_x
-                    case 0x23: gKcartVel = val; break;   // LQR K_x_dot
-                    case 0x50: {
-                        uint8_t m = buf[1];
-                        if (m == 0) disarm("Panel Standby");
-                        else if (m == 1) startSwingUp();
-                        else if (m == 2) armBalanceController();
-                        break;
-                    }
-                    case 0x52:
-                        if (armed) disarm("Zero requested");
-                        zeroEncoderDownward();
-                        calibrated = true;
-                        break;
-                    default:
-                        break;
-                }
-            } else {
-                break;
-            }
+            Serial.read(); // unknown byte: discard so the stream can resynchronise
         }
     }
 }
