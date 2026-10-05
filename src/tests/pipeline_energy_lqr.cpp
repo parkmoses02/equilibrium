@@ -26,7 +26,9 @@
  *      The header keeps binary frames unambiguous against the single-character ASCII
  *      commands (address 0x20 is ' ' = disarm and 0x50 is 'P' = flip polarity, which
  *      used to be misread as ASCII and desynchronised the stream).
- *    - Also accepts ASCII serial commands for testing (Z, A, S, X, P, D).
+ *    - Also accepts ASCII serial commands for testing (Z, A, S, X, P, D, O).
+ *      O (or frame 0x53) re-defines the CURRENT cart position as 0 without touching the
+ *      encoder zero: used to re-centre after the open-loop step counter drifted (lost steps).
  */
 
 // --- Pin Map (ESP32 WROOM + carrier Rev.J) ---
@@ -415,6 +417,16 @@ float updateSwingUp(float angle, float rate, float dt) {
     return constrain((swingTargetVelocity - v) / dt, -gSwingAccel, gSwingAccel);
 }
 
+// Re-define the current cart position as 0 (step counter origin). The cart position is an
+// open-loop step count, so after lost steps it no longer matches the real cart; the operator
+// moves the cart to the centre by hand and calls this. It only moves an offset (atomic inside
+// the TMC driver), keeps commandedVelocity untouched, and is safe in any mode.
+void zeroCartPosition() {
+    motor.actualPosition(0);
+    cartPosition = 0.0f;
+    Serial.println("OK: Cart position zeroed");
+}
+
 // --- Real-time Controller Loop (500 Hz) ---
 void updatePipelineController() {
     const uint32_t now = micros();
@@ -564,6 +576,9 @@ void applyFrame(const uint8_t* f) {
             zeroEncoderDownward();
             calibrated = true;
             break;
+        case 0x53:
+            zeroCartPosition(); // does NOT disarm and does NOT touch the encoder
+            break;
         default:
             break;
     }
@@ -611,6 +626,9 @@ void handleSerial() {
                 controlPolarity = -controlPolarity;
                 Serial.printf("OK: Control polarity = %d\n", controlPolarity);
             }
+        } else if (b == 'O' || b == 'o') {
+            Serial.read();
+            zeroCartPosition();
         } else if (b == 'D' || b == 'd') {
             // Works while balancing too: only the pendulum-loop gains change, so the cart
             // does not jump.

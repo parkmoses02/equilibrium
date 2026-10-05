@@ -681,14 +681,23 @@ class PipelineMainWindow(QtWidgets.QMainWindow):
                                  "현재 엔코더 위치를 '아래(hanging down)' 기준으로 설정합니다.\n"
                                  "펌웨어는 이걸 한 번 하기 전엔 Swing-up/Balance를 거부합니다.")
 
+        self.zero_pos_btn = QtWidgets.QPushButton('Zero Position')
+        self.zero_pos_btn.clicked.connect(self._cmd_zero_position)
+        self.zero_pos_btn.setToolTip(
+            "카트의 현재 위치를 0으로 다시 정의합니다(진자 엔코더 영점과는 무관, disarm 하지 않음).\n"
+            "위치는 모터에 보낸 스텝 수를 센 값이라 탈조가 나면 실제와 어긋납니다.\n"
+            "스윙업 후 카트를 손으로 천천히 레일 중앙에 놓은 뒤 누르세요.")
+
         self.stop_btn = QtWidgets.QPushButton('⛔ Emergency Disarm / Stop')
         self.stop_btn.setObjectName("dangerBtn")
+        self.stop_btn.setMinimumHeight(40)
         self.stop_btn.clicked.connect(self._cmd_stop)
         self.stop_btn.setToolTip("즉시 SAFE 모드(모터 정지)로 전환합니다. 이상하면 언제든 누르세요.")
 
         h_cmds2.addWidget(self.zero_btn)
-        h_cmds2.addWidget(self.stop_btn)
+        h_cmds2.addWidget(self.zero_pos_btn)
         l_actions.addLayout(h_cmds2)
+        l_actions.addWidget(self.stop_btn)   # full width, easy to hit in an emergency
 
         self.sim_btn = QtWidgets.QPushButton('🔄 Run & Replay Nonlinear Simulation')
         self.sim_btn.clicked.connect(self.run_simulation)
@@ -744,7 +753,7 @@ class PipelineMainWindow(QtWidgets.QMainWindow):
         pg.setConfigOption('background', '#161b22')
         pg.setConfigOption('foreground', '#8b949e')
 
-        self.plot_angle = pg.PlotWidget(title='Angle theta (deg) [Upright = 0]')
+        self.plot_angle = pg.PlotWidget(title='Angle (deg)  [180 = hanging down, 0/360 = upright]')
         self.plot_energy = pg.PlotWidget(title='Normalized Energy E [Target = 0]')
         self.plot_pos = pg.PlotWidget(title='Cart Position (mm)')
         self.plot_accel = pg.PlotWidget(title='Cart Acceleration (m/s^2) & Speed (m/s)')
@@ -753,11 +762,21 @@ class PipelineMainWindow(QtWidgets.QMainWindow):
             p.showGrid(x=True, y=True, alpha=0.3)
             p.setLabel('bottom', 'Time (s)')
 
-        # Catch window band in angle plot
-        self.cw_high = pg.InfiniteLine(pos=25.0, angle=0, pen=pg.mkPen('#2ea043', width=1, style=QtCore.Qt.DashLine))
-        self.cw_low = pg.InfiniteLine(pos=-25.0, angle=0, pen=pg.mkPen('#2ea043', width=1, style=QtCore.Qt.DashLine))
-        self.plot_angle.addItem(self.cw_high)
-        self.plot_angle.addItem(self.cw_low)
+        # Angle plot: the angle is shown modulo 360 so that the hanging position (180) is the
+        # centre and the upright position sits at the edges (0 and 360). The trace is unwrapped
+        # and drawn as 5 copies shifted by 360 deg, so a swing through the top continues across
+        # the edge instead of jumping; the view only shows -60..420.
+        self.angle_view = (-60.0, 420.0)
+        self.plot_angle.getAxis('left').setTicks([[
+            (0, '0 top'), (90, '90'), (180, '180 down'), (270, '270'), (360, '360 top')]])
+        # catch window (+-25 deg around upright) at both edges, hanging reference at 180
+        self.cw_lines = []
+        for v in (-25.0, 25.0, 335.0, 385.0):
+            ln = pg.InfiniteLine(pos=v, angle=0, pen=pg.mkPen('#2ea043', width=1, style=QtCore.Qt.DashLine))
+            self.plot_angle.addItem(ln)
+            self.cw_lines.append(ln)
+        self.plot_angle.addItem(pg.InfiniteLine(pos=180.0, angle=0,
+                                                pen=pg.mkPen('#6e7681', width=1, style=QtCore.Qt.DotLine)))
 
         # Energy target line
         self.energy_target_line = pg.InfiniteLine(pos=0.0, angle=0, pen=pg.mkPen('#2ea043', width=1.5))
@@ -769,7 +788,9 @@ class PipelineMainWindow(QtWidgets.QMainWindow):
         self.plot_pos.addItem(self.pos_limit_hi)
         self.plot_pos.addItem(self.pos_limit_lo)
 
-        self.curve_angle = self.plot_angle.plot([], [], pen=pg.mkPen('#58a6ff', width=2))
+        self.curves_angle = [self.plot_angle.plot([], [], pen=pg.mkPen('#58a6ff', width=2))
+                             for _ in range(5)]  # copies shifted by -720..+720 deg
+        self.curve_angle = self.curves_angle[2]   # the unshifted one
         self.curve_energy = self.plot_energy.plot([], [], pen=pg.mkPen('#f1e05a', width=2))
         self.curve_pos = self.plot_pos.plot([], [], pen=pg.mkPen('#79c0ff', width=2))
         self.curve_accel = self.plot_accel.plot([], [], pen=pg.mkPen('#ff7b72', width=2), name='Accel')
@@ -863,9 +884,10 @@ class PipelineMainWindow(QtWidgets.QMainWindow):
         if res is None:
             return
         t = res['time']
-        for plot in (self.plot_angle, self.plot_energy, self.plot_pos, self.plot_accel):
+        for plot in (self.plot_energy, self.plot_pos, self.plot_accel):
             plot.enableAutoRange()
-        self.curve_angle.setData(t, res['theta_deg'], connect='all')
+        self.plot_angle.enableAutoRange(axis='x')
+        self._set_angle_curves(t, res['theta_deg'])
         self.curve_energy.setData(t, res['energy'])
         self.curve_pos.setData(t, res['pos_mm'])
         self.curve_accel.setData(t, res['accel'])
@@ -889,17 +911,23 @@ class PipelineMainWindow(QtWidgets.QMainWindow):
             'mode': int(tel['mode']),
         }
 
-    @staticmethod
-    def _break_wraps(t, y):
-        """Insert NaN where the angle wraps (+-180) so the plot does not draw a vertical line."""
+    def _set_angle_curves(self, t, deg):
+        """Draw the angle (any wrap, upright = 0) centred on 180 deg = hanging down.
+
+        The angle is taken modulo 360, unwrapped into a continuous trace and drawn as copies
+        shifted by multiples of 360 so that a swing through the upright position (the plot
+        edges) continues across the edge.
+        """
         t = np.asarray(t, dtype=float)
-        y = np.asarray(y, dtype=float)
-        if len(y) < 2:
-            return t, y
-        jumps = np.where(np.abs(np.diff(y)) > 180.0)[0]
-        if len(jumps) == 0:
-            return t, y
-        return (np.insert(t, jumps + 1, np.nan), np.insert(y, jumps + 1, np.nan))
+        deg = np.asarray(deg, dtype=float)
+        if len(deg) == 0:
+            return
+        base = np.mod(deg, 360.0)
+        u = np.degrees(np.unwrap(np.radians(base)))
+        u = u - 360.0 * np.floor(u[0] / 360.0)      # start inside [0, 360)
+        for k, curve in zip((-2, -1, 0, 1, 2), self.curves_angle):
+            curve.setData(t, u + 360.0 * k)
+        self.plot_angle.setYRange(self.angle_view[0], self.angle_view[1], padding=0)
 
     def _enter_live_plots(self):
         for k in self._live_buf:
@@ -924,8 +952,7 @@ class PipelineMainWindow(QtWidgets.QMainWindow):
         b['vel'].append(v['vel'])
 
         ts = np.fromiter(b['t'], dtype=float)
-        ta, ya = self._break_wraps(ts, np.fromiter(b['angle'], dtype=float))
-        self.curve_angle.setData(ta, ya, connect='finite')
+        self._set_angle_curves(ts, np.fromiter(b['angle'], dtype=float))
         self.curve_energy.setData(ts, np.fromiter(b['energy'], dtype=float))
         self.curve_pos.setData(ts, np.fromiter(b['pos'], dtype=float))
         self.curve_accel.setData(ts, np.fromiter(b['accel'], dtype=float))
@@ -1059,6 +1086,13 @@ class PipelineMainWindow(QtWidgets.QMainWindow):
             return
         self.serial.set_move_mode(0) # PIPELINE_SAFE
         self.status_label.setText("TX: Emergency Stop / Safe mode commanded.")
+
+    def _cmd_zero_position(self):
+        if not self.serial:
+            self.status_label.setText("Zero Position: not connected.")
+            return
+        self.serial.send_float(0x53, 0.0)  # re-define current cart position as 0
+        self.status_label.setText("TX: Cart position zeroed (encoder zero unchanged).")
 
     def _cmd_zero(self):
         if not self.serial:
