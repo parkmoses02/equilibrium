@@ -3,10 +3,12 @@ Pipeline Controller: Hardware Serial + Real Riccati LQR + Acceleration Control +
 Reuses modules from panel/simulator.py and panel/serial_protocol.py.
 """
 
+import os
 import sys
 import math
 import time
 import struct
+import datetime
 from collections import deque
 import numpy as np
 from PyQt5 import QtWidgets, QtCore, QtGui
@@ -80,6 +82,11 @@ SWING_START_RATE = 0.5                           # rad/s
 SWING_SETTLE_TIMEOUT_S = 3.0
 
 PHASE_PREPOSITION, PHASE_SETTLE, PHASE_PUMP, PHASE_COAST, PHASE_RISE = range(5)
+
+# Angle recording (button "Record Angle"): length of the capture and where the PNGs go
+RECORD_SECONDS = 5.0
+RECORD_Y_LIMIT_DEG = 30.0      # saved image shows -30..+30 deg only (the balancing part)
+RECORD_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "angle_logs")
 
 
 def simulate_full_pipeline(length_m=0.20, friction=0.04, g=9.81,
@@ -465,6 +472,15 @@ class PipelineMainWindow(QtWidgets.QMainWindow):
             'mode': 0
         }
 
+        # Angle recording state (see _start_angle_recording)
+        self._rec_active = False
+        self._rec_source = None
+        self._rec_t0 = 0.0
+        self._rec_flip = 1.0
+        self._rec_trigger = None  # what started the recording (shown in the image title)
+        self._rec_angle = []     # (t, angle_deg) - live: raw telemetry packets, simulation: playback ticks
+        self._rec_mode = []      # (t, mode)
+
         # Live plot buffers (about 10 s of 30 fps samples)
         self._live_plots_active = False
         self._live_t0 = None
@@ -646,10 +662,19 @@ class PipelineMainWindow(QtWidgets.QMainWindow):
         l_limits.addRow('Rail Soft Limit [m]:', self.spin_cart_limit)
         l_limits.addRow('Swing Accel [m/s^2]:', self.spin_swing_accel)
         l_limits.addRow('Swing Speed [m/s]:', self.spin_swing_speed)
+        self.spin_arm_window = QtWidgets.QDoubleSpinBox()
+        self.spin_arm_window.setRange(5.0, 90.0); self.spin_arm_window.setDecimals(0); self.spin_arm_window.setValue(45.0)
+        self.spin_arm_window.setSuffix(' deg')
+        self.spin_arm_window.setToolTip(
+            "Direct LQR Balance 을 누를 수 있는 각도 범위 (수직 0도 기준 +-). 이 범위를 벗어나면 펌웨어가 거부합니다.\n"
+            "그 범위 안에서 시작해도 실제로 균형이 잡히는지는 보장하지 않습니다.\n"
+            "시작 후 트립(자동 정지) 각도는 이 값 + 10도(최소 25도)로 같이 넓어집니다.")
+        l_limits.addRow('Balance arm window (+-):', self.spin_arm_window)
 
         self.send_params_btn = QtWidgets.QPushButton('Transmit Limits to ESP32')
         self.send_params_btn.clicked.connect(self._send_limits_to_firmware)
         self.send_params_btn.setToolTip("최대 속도/가속도, 레일 한계, 진자 길이를 ESP32로 전송합니다.\n"
+                                        "Balance arm window 도 함께 보냅니다.\n"
                                         "(Swing Accel/Speed는 시뮬레이션 전용이라 전송되지 않습니다.)")
         l_limits.addRow(self.send_params_btn)
         left_layout.addWidget(grp_limits)
@@ -667,8 +692,9 @@ class PipelineMainWindow(QtWidgets.QMainWindow):
 
         self.balance_btn = QtWidgets.QPushButton('⚖ Direct LQR Balance')
         self.balance_btn.clicked.connect(self._cmd_balance)
-        self.balance_btn.setToolTip("스윙업 없이 곧바로 밸런싱. 진자를 손으로 세워 잡은 상태(±몇 도 이내)에서 누르세요.\n"
-                                    "게인을 먼저 전송합니다. 연결이 없으면 아무 일도 안 합니다.")
+        self.balance_btn.setToolTip("스윙업 없이 곧바로 밸런싱. 진자가 수직 기준 'Balance arm window' 이내일 때 누를 수 있습니다(기본 ±45도).\n"
+                                    "게인과 arm window 를 먼저 전송합니다. 범위 밖이면 펌웨어가 거부합니다(시리얼에만 표시). 연결이 없으면 아무 일도 안 합니다.\n"
+                                    "누르는 순간 5초 각도 기록(Record Angle)도 함께 시작됩니다.")
 
         h_cmds.addWidget(self.swing_btn)
         h_cmds.addWidget(self.balance_btn)
@@ -703,6 +729,18 @@ class PipelineMainWindow(QtWidgets.QMainWindow):
         self.sim_btn.clicked.connect(self.run_simulation)
         self.sim_btn.setToolTip("PC 안에서만 돌리는 비선형 시뮬레이션을 다시 계산해 재생합니다. 하드웨어와 무관.")
         l_actions.addWidget(self.sim_btn)
+
+        self.rec_btn = QtWidgets.QPushButton(f'Record Angle ({RECORD_SECONDS:g} s) -> PNG')
+        self.rec_btn.clicked.connect(self._start_angle_recording)
+        self.rec_btn.setToolTip(
+            f"누른 순간부터 {RECORD_SECONDS:g}초 동안 진자 각도를 기록해서 PNG 이미지로 저장합니다.\n"
+            "연결돼 있으면 ESP32 텔레메트리(약 50Hz), 연결이 없으면 시뮬레이션 재생 값을 기록합니다.\n"
+            "swing-up / balance 구간은 배경색으로 표시됩니다. 저장 위치: panel/angle_logs/")
+        l_actions.addWidget(self.rec_btn)
+        self.rec_label = QtWidgets.QLabel('')
+        self.rec_label.setWordWrap(True)
+        self.rec_label.setStyleSheet("color: #8b949e; font-family: monospace; font-size: 10px;")
+        l_actions.addWidget(self.rec_label)
 
         left_layout.addWidget(grp_actions)
         left_layout.addStretch()
@@ -753,7 +791,7 @@ class PipelineMainWindow(QtWidgets.QMainWindow):
         pg.setConfigOption('background', '#161b22')
         pg.setConfigOption('foreground', '#8b949e')
 
-        self.plot_angle = pg.PlotWidget(title='Angle (deg)  [180 = hanging down, 0/360 = upright]')
+        self.plot_angle = pg.PlotWidget(title='Angle theta (deg) [Upright = 0]')
         self.plot_energy = pg.PlotWidget(title='Normalized Energy E [Target = 0]')
         self.plot_pos = pg.PlotWidget(title='Cart Position (mm)')
         self.plot_accel = pg.PlotWidget(title='Cart Acceleration (m/s^2) & Speed (m/s)')
@@ -762,21 +800,11 @@ class PipelineMainWindow(QtWidgets.QMainWindow):
             p.showGrid(x=True, y=True, alpha=0.3)
             p.setLabel('bottom', 'Time (s)')
 
-        # Angle plot: the angle is shown modulo 360 so that the hanging position (180) is the
-        # centre and the upright position sits at the edges (0 and 360). The trace is unwrapped
-        # and drawn as 5 copies shifted by 360 deg, so a swing through the top continues across
-        # the edge instead of jumping; the view only shows -60..420.
-        self.angle_view = (-60.0, 420.0)
-        self.plot_angle.getAxis('left').setTicks([[
-            (0, '0 top'), (90, '90'), (180, '180 down'), (270, '270'), (360, '360 top')]])
-        # catch window (+-25 deg around upright) at both edges, hanging reference at 180
-        self.cw_lines = []
-        for v in (-25.0, 25.0, 335.0, 385.0):
-            ln = pg.InfiniteLine(pos=v, angle=0, pen=pg.mkPen('#2ea043', width=1, style=QtCore.Qt.DashLine))
-            self.plot_angle.addItem(ln)
-            self.cw_lines.append(ln)
-        self.plot_angle.addItem(pg.InfiniteLine(pos=180.0, angle=0,
-                                                pen=pg.mkPen('#6e7681', width=1, style=QtCore.Qt.DotLine)))
+        # Catch window band in angle plot
+        self.cw_high = pg.InfiniteLine(pos=25.0, angle=0, pen=pg.mkPen('#2ea043', width=1, style=QtCore.Qt.DashLine))
+        self.cw_low = pg.InfiniteLine(pos=-25.0, angle=0, pen=pg.mkPen('#2ea043', width=1, style=QtCore.Qt.DashLine))
+        self.plot_angle.addItem(self.cw_high)
+        self.plot_angle.addItem(self.cw_low)
 
         # Energy target line
         self.energy_target_line = pg.InfiniteLine(pos=0.0, angle=0, pen=pg.mkPen('#2ea043', width=1.5))
@@ -788,9 +816,7 @@ class PipelineMainWindow(QtWidgets.QMainWindow):
         self.plot_pos.addItem(self.pos_limit_hi)
         self.plot_pos.addItem(self.pos_limit_lo)
 
-        self.curves_angle = [self.plot_angle.plot([], [], pen=pg.mkPen('#58a6ff', width=2))
-                             for _ in range(5)]  # copies shifted by -720..+720 deg
-        self.curve_angle = self.curves_angle[2]   # the unshifted one
+        self.curve_angle = self.plot_angle.plot([], [], pen=pg.mkPen('#58a6ff', width=2))
         self.curve_energy = self.plot_energy.plot([], [], pen=pg.mkPen('#f1e05a', width=2))
         self.curve_pos = self.plot_pos.plot([], [], pen=pg.mkPen('#79c0ff', width=2))
         self.curve_accel = self.plot_accel.plot([], [], pen=pg.mkPen('#ff7b72', width=2), name='Accel')
@@ -884,10 +910,10 @@ class PipelineMainWindow(QtWidgets.QMainWindow):
         if res is None:
             return
         t = res['time']
-        for plot in (self.plot_energy, self.plot_pos, self.plot_accel):
+        for plot in (self.plot_angle, self.plot_energy, self.plot_pos, self.plot_accel):
             plot.enableAutoRange()
-        self.plot_angle.enableAutoRange(axis='x')
-        self._set_angle_curves(t, res['theta_deg'])
+        ta, ya = self._break_wraps(t, res['theta_deg'])
+        self.curve_angle.setData(ta, ya, connect='finite')
         self.curve_energy.setData(t, res['energy'])
         self.curve_pos.setData(t, res['pos_mm'])
         self.curve_accel.setData(t, res['accel'])
@@ -911,23 +937,20 @@ class PipelineMainWindow(QtWidgets.QMainWindow):
             'mode': int(tel['mode']),
         }
 
-    def _set_angle_curves(self, t, deg):
-        """Draw the angle (any wrap, upright = 0) centred on 180 deg = hanging down.
+    @staticmethod
+    def _break_wraps(t, y):
+        """Break the line where the angle wraps (+-180) so no vertical line is drawn across the plot.
 
-        The angle is taken modulo 360, unwrapped into a continuous trace and drawn as copies
-        shifted by multiples of 360 so that a swing through the upright position (the plot
-        edges) continues across the edge.
+        NaN is inserted into y only (x is repeated), so the x auto-range is not disturbed.
         """
         t = np.asarray(t, dtype=float)
-        deg = np.asarray(deg, dtype=float)
-        if len(deg) == 0:
-            return
-        base = np.mod(deg, 360.0)
-        u = np.degrees(np.unwrap(np.radians(base)))
-        u = u - 360.0 * np.floor(u[0] / 360.0)      # start inside [0, 360)
-        for k, curve in zip((-2, -1, 0, 1, 2), self.curves_angle):
-            curve.setData(t, u + 360.0 * k)
-        self.plot_angle.setYRange(self.angle_view[0], self.angle_view[1], padding=0)
+        y = np.asarray(y, dtype=float)
+        if len(y) < 2:
+            return t, y
+        jumps = np.where(np.abs(np.diff(y)) > 180.0)[0]
+        if len(jumps) == 0:
+            return t, y
+        return np.insert(t, jumps + 1, t[jumps]), np.insert(y, jumps + 1, np.nan)
 
     def _enter_live_plots(self):
         for k in self._live_buf:
@@ -952,7 +975,8 @@ class PipelineMainWindow(QtWidgets.QMainWindow):
         b['vel'].append(v['vel'])
 
         ts = np.fromiter(b['t'], dtype=float)
-        self._set_angle_curves(ts, np.fromiter(b['angle'], dtype=float))
+        ta, ya = self._break_wraps(ts, np.fromiter(b['angle'], dtype=float))
+        self.curve_angle.setData(ta, ya, connect='finite')
         self.curve_energy.setData(ts, np.fromiter(b['energy'], dtype=float))
         self.curve_pos.setData(ts, np.fromiter(b['pos'], dtype=float))
         self.curve_accel.setData(ts, np.fromiter(b['accel'], dtype=float))
@@ -963,9 +987,128 @@ class PipelineMainWindow(QtWidgets.QMainWindow):
             plot.setXRange(lo, hi, padding=0)
 
     # -------------------------------------------------------------
+    # Angle recording -> PNG
+    # -------------------------------------------------------------
+    def _start_angle_recording(self, *_, trigger=None):
+        """Record the pendulum angle for RECORD_SECONDS and save it as a PNG (see _save_angle_png).
+
+        Called by the Record Angle button and by Direct LQR Balance (trigger='Direct LQR Balance').
+        *_ swallows the 'checked' bool that Qt passes for button clicks.
+        """
+        if self._rec_active:
+            return
+        live = self.serial is not None
+        if live and self._rx_count == 0:
+            self.rec_label.setText("No telemetry received yet: nothing to record.")
+            return
+        self._rec_source = 'live' if live else 'sim'
+        self._rec_trigger = trigger
+        # same sign as the on-screen angle (Flip pendulum tilt applies to live data only)
+        self._rec_flip = -1.0 if (live and self.chk_flip_tilt.isChecked()) else 1.0
+        self._rec_angle = []
+        self._rec_mode = []
+        if live:   # first sample right at t = 0
+            self._rec_angle.append((0.0, self._rec_flip * math.degrees(self._live_telemetry['angle'])))
+            self._rec_mode.append((0.0, int(self._live_telemetry['mode'])))
+        self._rec_t0 = time.monotonic()
+        self._rec_active = True
+        self.rec_btn.setEnabled(False)
+        self.rec_btn.setText(f"Recording... {RECORD_SECONDS:.1f} s")
+        self.rec_label.setText(f"recording angle from {'ESP32 telemetry' if live else 'simulation playback'} ...")
+
+    def _finish_angle_recording(self):
+        self._rec_active = False
+        angle, modes = list(self._rec_angle), list(self._rec_mode)
+        source, flip, trigger = self._rec_source, self._rec_flip, self._rec_trigger
+        self.rec_btn.setEnabled(True)
+        self.rec_btn.setText(f'Record Angle ({RECORD_SECONDS:g} s) -> PNG')
+        angle = [a for a in angle if a[0] <= RECORD_SECONDS + 1e-9]
+        if len(angle) < 2:
+            self.rec_label.setText("Recording failed: fewer than 2 samples were received.")
+            return
+        try:
+            path = self._save_angle_png(angle, modes, source, flip, trigger)
+        except Exception as e:                       # never let a plotting problem break the GUI
+            self.rec_label.setText(f"Could not save the image: {e}")
+            return
+        self.rec_label.setText(f"saved ({len(angle)} samples):\n{path}")
+        print(f"[Record Angle] saved {path}")
+
+    def _save_angle_png(self, angle, modes, source, flip, trigger=None):
+        """Draw the recorded angle (white background, upright = 0 in the centre) and save a PNG."""
+        os.makedirs(RECORD_DIR, exist_ok=True)
+        now = datetime.datetime.now()
+        base = os.path.join(RECORD_DIR, f"angle_{now.strftime('%Y%m%d_%H%M%S')}")
+        path, n = base + ".png", 1
+        while os.path.exists(path):          # never overwrite an earlier recording
+            path, n = f"{base}_{n}.png", n + 1
+
+        t = np.array([a[0] for a in angle], dtype=float)
+        y = np.array([a[1] for a in angle], dtype=float)
+        ta, ya = self._break_wraps(t, y)
+
+        plot = pg.PlotWidget()
+        plot.resize(1400, 600)
+        plot.setBackground('w')
+        item = plot.getPlotItem()
+        for name in ('left', 'bottom'):
+            ax = item.getAxis(name)
+            ax.setPen(pg.mkPen('k'))
+            ax.setTextPen(pg.mkPen('k'))
+        src = "ESP32 telemetry" if source == 'live' else "simulation playback"
+        title = (f"Pendulum angle   |   {src}   |   {now.strftime('%Y-%m-%d %H:%M:%S')}   |   "
+                 f"{len(t)} samples" + ("   |   tilt flipped" if flip < 0 else "")
+                 + (f"   |   started by: {trigger}" if trigger else ""))
+        legend = ('<span style="color:#d98200;">&#9632; swing-up</span> &nbsp;&nbsp; '
+                  '<span style="color:#2ea043;">&#9632; balance</span> &nbsp;&nbsp; '
+                  '<span style="color:#2ea043;">- - - catch window (+-25 deg)</span>')
+        item.setTitle(f'<span style="color:#000000; font-size:11pt;">{title}</span><br>'
+                      f'<span style="font-size:10pt;">{legend}</span>')
+        item.setLabel('left', 'Angle theta (deg)   [upright = 0]', color='k')
+        item.setLabel('bottom', 'Time since button press (s)', color='k')
+        item.showGrid(x=True, y=True, alpha=0.3)
+        item.setXRange(0.0, RECORD_SECONDS, padding=0)
+        item.setYRange(-RECORD_Y_LIMIT_DEG, RECORD_Y_LIMIT_DEG, padding=0)
+
+        # mode background: orange = swing-up, green = balance
+        colors = {1: (255, 170, 0, 55), 2: (46, 160, 67, 55)}
+        modes = sorted(modes)
+        for i, (tm, m) in enumerate(modes):
+            t_end = modes[i + 1][0] if i + 1 < len(modes) else RECORD_SECONDS
+            t_start = 0.0 if i == 0 else tm
+            if m in colors and t_end > t_start:
+                band = pg.LinearRegionItem(values=(t_start, min(t_end, RECORD_SECONDS)), movable=False,
+                                           brush=pg.mkBrush(colors[m]), pen=pg.mkPen(None))
+                band.setZValue(-10)
+                item.addItem(band)
+
+        for v in (25.0, -25.0):     # catch window
+            item.addItem(pg.InfiniteLine(pos=v, angle=0, pen=pg.mkPen((46, 160, 67), width=1, style=QtCore.Qt.DashLine)))
+        item.addItem(pg.InfiniteLine(pos=0.0, angle=0, pen=pg.mkPen((120, 120, 120), width=1)))
+        item.plot(ta, ya, pen=pg.mkPen('#1f77b4', width=2), connect='finite')
+
+        # Render the widget exactly as laid out at 1400x600. It is shown with WA_DontShowOnScreen so
+        # no window flashes up; grabbing a never-shown widget would give a broken layout.
+        plot.setAttribute(QtCore.Qt.WA_DontShowOnScreen, True)
+        plot.show()
+        QtWidgets.QApplication.processEvents()
+        ok = plot.grab().save(path)
+        plot.close()
+        plot.deleteLater()
+        if not ok:
+            raise IOError(f"could not write {path}")
+        return path
+
+    # -------------------------------------------------------------
     # Animation and Telemetry Tick
     # -------------------------------------------------------------
     def _on_tick(self):
+        if self._rec_active:
+            elapsed = time.monotonic() - self._rec_t0
+            if elapsed >= RECORD_SECONDS:
+                self._finish_angle_recording()
+            else:
+                self.rec_btn.setText(f"Recording... {RECORD_SECONDS - elapsed:.1f} s")
         if self.serial is not None and self._rx_count > 0:
             # Live hardware display (flip options applied to screen, graphs and text)
             if not self._live_plots_active:
@@ -988,6 +1131,10 @@ class PipelineMainWindow(QtWidgets.QMainWindow):
             angle_screen_deg = 180.0 + self._sim_result['theta_deg'][self._sim_idx]
             pos_mm = self._sim_result['pos_mm'][self._sim_idx]
             self.pendulum_widget.set_state(angle_screen_deg, pos_mm)
+            if self._rec_active and self._rec_source == 'sim':
+                t = time.monotonic() - self._rec_t0
+                self._rec_angle.append((t, float(self._sim_result['theta_deg'][self._sim_idx])))
+                self._rec_mode.append((t, 1 + int(self._sim_result['mode'][self._sim_idx])))  # 0/1 -> swing/balance
 
     # -------------------------------------------------------------
     # Serial Communication Handlers
@@ -1017,6 +1164,12 @@ class PipelineMainWindow(QtWidgets.QMainWindow):
 
     def _on_packet_received(self, addr, value):
         self._rx_count += 1
+        if self._rec_active and self._rec_source == 'live':      # runs on the serial thread
+            t = time.monotonic() - self._rec_t0
+            if addr == 0x00:
+                self._rec_angle.append((t, self._rec_flip * math.degrees(value)))
+            elif addr == 0x06:
+                self._rec_mode.append((t, int(value)))
         if addr == 0x00: self._live_telemetry['angle'] = value
         elif addr == 0x01: self._live_telemetry['rate'] = value
         elif addr == 0x02: self._live_telemetry['pos'] = value
@@ -1060,6 +1213,7 @@ class PipelineMainWindow(QtWidgets.QMainWindow):
             (0x02, float(self.spin_max_accel.value())),
             (0x07, float(self.spin_cart_limit.value())),
             (0x0B, float(self.spin_L.value())),
+            (0x27, float(self.spin_arm_window.value())),   # direct-balance arm window [deg]
         ]
         for a, v in params:
             self.serial.send_float(a, v)
@@ -1077,9 +1231,14 @@ class PipelineMainWindow(QtWidgets.QMainWindow):
     def _cmd_balance(self):
         if not self.serial:
             return
+        # t = 0 of the recording is the moment of the button press. If a recording is already running or
+        # there is no telemetry yet, the recording is skipped but the balance command still goes out.
+        self._start_angle_recording(trigger="Direct LQR Balance")
         self._send_k_to_firmware()
+        self.serial.send_float(0x27, float(self.spin_arm_window.value()))   # arm window must be known before arming
         self.serial.set_move_mode(2) # PIPELINE_BALANCE
-        self.status_label.setText("TX: Direct LQR Balance commanded.")
+        self.status_label.setText(f"TX: Direct LQR Balance commanded (arm window +-{self.spin_arm_window.value():.0f} deg), "
+                                  f"recording {RECORD_SECONDS:g} s.")
 
     def _cmd_stop(self):
         if not self.serial:

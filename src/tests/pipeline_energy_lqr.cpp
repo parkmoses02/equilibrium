@@ -52,8 +52,12 @@ constexpr float GRAVITY = 9.81f;
 float gMaxCartSpeed = 0.80f;     // m/s
 float gMaxCartAccel = 12.0f;    // m/s^2
 float gCartSoftLimit = 0.35f;   // m (rail soft limit from origin)
-constexpr float ARM_WINDOW_RAD = 10.0f * PI / 180.0f;
-constexpr float TRIP_ANGLE_RAD = 25.0f * PI / 180.0f;
+// Direct balance ('A' / panel "Direct LQR Balance"): the pendulum must be within +-gArmWindowRad of
+// upright when arming. Adjustable from the panel (frame 0x27, degrees, 1..90). The balance does not
+// have to be catchable from there; the window only decides whether arming is allowed.
+float gArmWindowRad = 45.0f * PI / 180.0f;
+constexpr float ARM_TRIP_MARGIN_RAD = 10.0f * PI / 180.0f;   // trip angle = window + margin (directly armed)
+constexpr float TRIP_ANGLE_RAD = 25.0f * PI / 180.0f;        // normal trip angle (swing-up -> catch path)
 constexpr uint32_t CONTROL_PERIOD_US = 2000; // 500 Hz control loop
 constexpr uint32_t TELEMETRY_PERIOD_MS = 20; // 50 Hz telemetry
 
@@ -188,6 +192,7 @@ bool apexHandled = false;
 uint32_t swingStartMs = 0;
 uint32_t phaseStartMs = 0;
 uint32_t relaxedTripUntilMs = 0;
+float balanceTripRad = TRIP_ANGLE_RAD;   // trip angle used while balancing (widened for a direct arm)
 uint32_t catchMs = 0;
 
 float angularRate = 0.0f;
@@ -263,8 +268,9 @@ void armBalanceController() {
         return;
     }
     const float angle = uprightAngleFromCount(readEncoderCount());
-    if (fabsf(angle) > ARM_WINDOW_RAD) {
-        Serial.printf("ARM REFUSED: hold within 10 deg (now %.2f deg).\n", angle * 180.0f / PI);
+    if (fabsf(angle) > gArmWindowRad) {
+        Serial.printf("ARM REFUSED: hold within %.0f deg (now %.2f deg).\n",
+                      gArmWindowRad * 180.0f / PI, angle * 180.0f / PI);
         return;
     }
     motor.actualPosition(0);
@@ -274,6 +280,9 @@ void armBalanceController() {
     angularRate = 0.0f;
     lastControlUs = micros();
     relaxedTripUntilMs = millis();
+    // Armed from a tilted start: the trip angle must be wider than the arm window, otherwise the
+    // very first control tick would disarm again.
+    balanceTripRad = max(TRIP_ANGLE_RAD, gArmWindowRad + ARM_TRIP_MARGIN_RAD);
     catchMs = millis() - CATCH_STIFF_MS - CATCH_BLEND_MS;
     digitalWrite(PIN_TMC_EN, LOW);
     setPipelineMode(PIPELINE_BALANCE);
@@ -295,6 +304,7 @@ void startSwingUp() {
                       psi * 180.0f / PI, angularRate);
         return;
     }
+    balanceTripRad = TRIP_ANGLE_RAD;   // the swing-up -> catch path keeps the normal trip angle
     motor.actualPosition(0);
     cartPosition = 0.0f;
     commandedVelocity = 0.0f;
@@ -466,7 +476,7 @@ void updatePipelineController() {
     }
 
     // Mode: Riccati LQR Balance
-    const float tripAngle = (millis() < relaxedTripUntilMs) ? CATCH_TRIP_RAD : TRIP_ANGLE_RAD;
+    const float tripAngle = (millis() < relaxedTripUntilMs) ? CATCH_TRIP_RAD : balanceTripRad;
     if (fabsf(angle) > tripAngle) {
         disarm("Pendulum exceeded trip angle");
         return;
@@ -564,6 +574,7 @@ void applyFrame(const uint8_t* f) {
         case 0x24: gKangleSoft = val; break; // soft-balance K_theta
         case 0x25: gKrateSoft = val; break;  // soft-balance K_theta_dot
         case 0x26: softBalance = (val != 0.0f); break; // soft balance on/off (same as 'D')
+        case 0x27: gArmWindowRad = constrain(val, 1.0f, 90.0f) * PI / 180.0f; break; // direct-balance arm window [deg]
         case 0x50: {
             const uint8_t m = f[2];
             if (m == 0) disarm("Panel Standby");
