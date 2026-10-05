@@ -5,7 +5,9 @@ Reuses modules from panel/simulator.py and panel/serial_protocol.py.
 
 import sys
 import math
+import time
 import struct
+from collections import deque
 import numpy as np
 from PyQt5 import QtWidgets, QtCore, QtGui
 import pyqtgraph as pg
@@ -305,7 +307,7 @@ class PendulumWidget(QtWidgets.QWidget):
         self.angle_deg = 180.0 # upright = 180 deg on screen (or 0 rad)
         self.position_mm = 0.0
         self.range_mm = 350.0
-        self.setMinimumHeight(240)
+        self.setMinimumHeight(300)
 
     def set_state(self, angle_deg, position_mm):
         self.angle_deg = angle_deg
@@ -316,12 +318,67 @@ class PendulumWidget(QtWidgets.QWidget):
         self.range_mm = max(10.0, float(range_mm))
         self.update()
 
+    def _mm_to_px(self, mm, w):
+        return (mm + self.range_mm) / (2.0 * self.range_mm) * (w - 80) + 40
+
+    def _draw_ruler(self, p, w, rail_y, cart_px):
+        """mm scale under the rail: 0 at the centre, + to the right, soft limits in red."""
+        y0 = rail_y + 16
+        small = QtGui.QFont(); small.setPointSize(8)
+        p.setFont(small)
+        fm = QtGui.QFontMetrics(small)
+
+        # baseline
+        p.setPen(QtGui.QPen(QtGui.QColor(139, 148, 158), 1.5))
+        p.drawLine(QtCore.QPointF(self._mm_to_px(-self.range_mm, w), y0),
+                   QtCore.QPointF(self._mm_to_px(self.range_mm, w), y0))
+
+        # tick steps: 10 mm minor, 50 mm medium, 100 mm major (labelled)
+        n = int(self.range_mm // 10)
+        for i in range(-n, n + 1):
+            mm = i * 10
+            x = self._mm_to_px(mm, w)
+            if mm % 100 == 0:
+                length, width, col = 12, 1.6, QtGui.QColor(201, 209, 217)
+            elif mm % 50 == 0:
+                length, width, col = 8, 1.2, QtGui.QColor(160, 168, 178)
+            else:
+                length, width, col = 4, 1.0, QtGui.QColor(110, 118, 129)
+            if mm == 0:
+                length, width, col = 16, 2.2, QtGui.QColor(88, 166, 255)
+            p.setPen(QtGui.QPen(col, width))
+            p.drawLine(QtCore.QPointF(x, y0), QtCore.QPointF(x, y0 + length))
+            if mm % 100 == 0:
+                label = '0' if mm == 0 else f"{mm:+d}"
+                p.setPen(QtGui.QPen(QtGui.QColor(201, 209, 217)))
+                p.drawText(QtCore.QPointF(x - fm.horizontalAdvance(label) / 2.0, y0 + 28), label)
+
+        # soft limit markers
+        p.setPen(QtGui.QPen(QtGui.QColor(248, 81, 73), 2))
+        for sgn in (-1, 1):
+            x = self._mm_to_px(sgn * self.range_mm, w)
+            p.drawLine(QtCore.QPointF(x, y0 - 6), QtCore.QPointF(x, y0 + 16))
+        lim = f"limit {self.range_mm:.0f} mm"
+        p.setPen(QtGui.QPen(QtGui.QColor(248, 81, 73)))
+        p.drawText(QtCore.QPointF(self._mm_to_px(self.range_mm, w) - fm.horizontalAdvance(lim), y0 + 42), lim)
+        p.drawText(QtCore.QPointF(self._mm_to_px(-self.range_mm, w), y0 + 42), lim)
+
+        # cart position marker + numeric readout
+        p.setPen(QtGui.QPen(QtGui.QColor(46, 204, 113), 1.5, QtCore.Qt.DashLine))
+        p.drawLine(QtCore.QPointF(cart_px, rail_y + 8), QtCore.QPointF(cart_px, y0 + 16))
+        txt = f"{self.position_mm:+.1f} mm"
+        bold = QtGui.QFont(); bold.setPointSize(10); bold.setBold(True)
+        p.setFont(bold)
+        p.setPen(QtGui.QPen(QtGui.QColor(46, 204, 113)))
+        tw = QtGui.QFontMetrics(bold).horizontalAdvance(txt)
+        p.drawText(QtCore.QPointF(cart_px - tw / 2.0, y0 + 56), txt)
+
     def paintEvent(self, event):
         p = QtGui.QPainter(self)
         p.setRenderHint(QtGui.QPainter.Antialiasing)
         try:
             w, h = self.width(), self.height()
-            rail_y = h * 0.65
+            rail_y = h * 0.58
 
             # Background clear
             p.fillRect(self.rect(), QtGui.QColor("#1e222d"))
@@ -332,7 +389,10 @@ class PendulumWidget(QtWidgets.QWidget):
 
             # Rail soft limit boundaries
             pos_clamped = max(-self.range_mm, min(self.range_mm, self.position_mm))
-            px = (pos_clamped + self.range_mm) / (2.0 * self.range_mm) * (w - 80) + 40
+            px = self._mm_to_px(pos_clamped, w)
+
+            # Ruler under the rail (same mm -> pixel mapping as the cart)
+            self._draw_ruler(p, w, rail_y, px)
 
             # Cart
             cart_w, cart_h = 50, 22
@@ -404,6 +464,11 @@ class PipelineMainWindow(QtWidgets.QMainWindow):
             'accel': 0.0,
             'mode': 0
         }
+
+        # Live plot buffers (about 10 s of 30 fps samples)
+        self._live_plots_active = False
+        self._live_t0 = None
+        self._live_buf = {k: deque(maxlen=400) for k in ('t', 'angle', 'energy', 'pos', 'accel', 'vel')}
 
         # Simulation playback state
         self._sim_result = None
@@ -479,6 +544,8 @@ class PipelineMainWindow(QtWidgets.QMainWindow):
 
         self.status_label = QtWidgets.QLabel('Status: Offline (Local Simulation Active)')
         self.status_label.setStyleSheet("color: #8b949e; font-family: monospace;")
+        self.status_label.setWordWrap(True)
+        self.status_label.setMinimumHeight(34)
         l_port.addWidget(self.status_label)
         left_layout.addWidget(grp_port)
 
@@ -650,6 +717,24 @@ class PipelineMainWindow(QtWidgets.QMainWindow):
         self.pendulum_widget = PendulumWidget()
         right_layout.addWidget(self.pendulum_widget, stretch=2)
 
+        # View options for LIVE hardware data only (the simulation already uses the screen
+        # convention: + = right for both cart position and pendulum tilt).
+        h_view = QtWidgets.QHBoxLayout()
+        self.chk_flip_cart = QtWidgets.QCheckBox('Flip cart left/right (live)')
+        self.chk_flip_cart.setChecked(True)
+        self.chk_flip_cart.setToolTip(
+            "하드웨어의 +방향과 화면의 +방향(오른쪽)이 반대일 때 카트 위치/속도/가속도의 부호를 뒤집어 표시합니다.\n"
+            "화면, 그래프, 상태 문구에 모두 적용되고 펌웨어 값 자체는 바뀌지 않습니다.\n"
+            "(펌웨어 극성 -1 은 시뮬레이션과 카트 방향이 반대인 좌표계입니다.)")
+        self.chk_flip_tilt = QtWidgets.QCheckBox('Flip pendulum tilt (live)')
+        self.chk_flip_tilt.setChecked(False)
+        self.chk_flip_tilt.setToolTip(
+            "진자가 기우는 방향이 실제와 반대로 보이면 체크하세요. 각도/각속도의 부호를 뒤집어 표시합니다.")
+        h_view.addWidget(self.chk_flip_cart)
+        h_view.addWidget(self.chk_flip_tilt)
+        h_view.addStretch()
+        right_layout.addLayout(h_view)
+
         # 2x2 Telemetry Graphs
         grid_widget = QtWidgets.QWidget()
         grid_layout = QtWidgets.QGridLayout(grid_widget)
@@ -764,36 +849,109 @@ class PipelineMainWindow(QtWidgets.QMainWindow):
         )
         self._sim_result = res
         self._sim_idx = 0
+        self._show_sim_plots()
 
-        # Plot full trajectories
-        t = res['time']
-        self.curve_angle.setData(t, res['theta_deg'])
-        self.curve_energy.setData(t, res['energy'])
-        self.curve_pos.setData(t, res['pos_mm'])
-        self.curve_accel.setData(t, res['accel'])
-        self.curve_vel.setData(t, res['vel_m_s'])
-
+    def _apply_rail_range(self):
         limit_mm = float(self.spin_cart_limit.value()) * 1000.0
         self.pos_limit_hi.setValue(limit_mm)
         self.pos_limit_lo.setValue(-limit_mm)
         self.pendulum_widget.set_range(limit_mm)
+
+    def _show_sim_plots(self):
+        """Plot the full simulated trajectories (also used to restore them after a disconnect)."""
+        res = self._sim_result
+        if res is None:
+            return
+        t = res['time']
+        for plot in (self.plot_angle, self.plot_energy, self.plot_pos, self.plot_accel):
+            plot.enableAutoRange()
+        self.curve_angle.setData(t, res['theta_deg'], connect='all')
+        self.curve_energy.setData(t, res['energy'])
+        self.curve_pos.setData(t, res['pos_mm'])
+        self.curve_accel.setData(t, res['accel'])
+        self.curve_vel.setData(t, res['vel_m_s'])
+        self._apply_rail_range()
+
+    # -------------------------------------------------------------
+    # Live telemetry view (graphs + display sign options)
+    # -------------------------------------------------------------
+    def _live_view(self):
+        """Telemetry converted to display units/signs (flip options applied)."""
+        tel = self._live_telemetry
+        sc = -1.0 if self.chk_flip_cart.isChecked() else 1.0   # cart: pos / vel / accel
+        st = -1.0 if self.chk_flip_tilt.isChecked() else 1.0   # pendulum: angle / rate
+        return {
+            'angle_deg': st * math.degrees(tel['angle']),
+            'pos_mm': sc * tel['pos'] * 1000.0,
+            'vel': sc * tel['vel'],
+            'accel': sc * tel['accel'],
+            'energy': tel['energy'],
+            'mode': int(tel['mode']),
+        }
+
+    @staticmethod
+    def _break_wraps(t, y):
+        """Insert NaN where the angle wraps (+-180) so the plot does not draw a vertical line."""
+        t = np.asarray(t, dtype=float)
+        y = np.asarray(y, dtype=float)
+        if len(y) < 2:
+            return t, y
+        jumps = np.where(np.abs(np.diff(y)) > 180.0)[0]
+        if len(jumps) == 0:
+            return t, y
+        return (np.insert(t, jumps + 1, np.nan), np.insert(y, jumps + 1, np.nan))
+
+    def _enter_live_plots(self):
+        for k in self._live_buf:
+            self._live_buf[k].clear()
+        self._live_t0 = time.monotonic()
+        self._live_plots_active = True
+        self._apply_rail_range()
+
+    def _exit_live_plots(self):
+        """Back to the simulation plots (called on disconnect)."""
+        self._live_plots_active = False
+        self._show_sim_plots()
+
+    def _update_live_plots(self, v):
+        b = self._live_buf
+        t = time.monotonic() - self._live_t0
+        b['t'].append(t)
+        b['angle'].append(v['angle_deg'])
+        b['energy'].append(v['energy'])
+        b['pos'].append(v['pos_mm'])
+        b['accel'].append(v['accel'])
+        b['vel'].append(v['vel'])
+
+        ts = np.fromiter(b['t'], dtype=float)
+        ta, ya = self._break_wraps(ts, np.fromiter(b['angle'], dtype=float))
+        self.curve_angle.setData(ta, ya, connect='finite')
+        self.curve_energy.setData(ts, np.fromiter(b['energy'], dtype=float))
+        self.curve_pos.setData(ts, np.fromiter(b['pos'], dtype=float))
+        self.curve_accel.setData(ts, np.fromiter(b['accel'], dtype=float))
+        self.curve_vel.setData(ts, np.fromiter(b['vel'], dtype=float))
+        # scrolling ~10 s window, right edge = now
+        lo, hi = max(0.0, t - 10.0), max(10.0, t)
+        for plot in (self.plot_angle, self.plot_energy, self.plot_pos, self.plot_accel):
+            plot.setXRange(lo, hi, padding=0)
 
     # -------------------------------------------------------------
     # Animation and Telemetry Tick
     # -------------------------------------------------------------
     def _on_tick(self):
         if self.serial is not None and self._rx_count > 0:
-            # Live hardware display
-            angle_deg = 180.0 + math.degrees(self._live_telemetry['angle'])
-            pos_mm = self._live_telemetry['pos'] * 1000.0
-            self.pendulum_widget.set_state(angle_deg, pos_mm)
+            # Live hardware display (flip options applied to screen, graphs and text)
+            if not self._live_plots_active:
+                self._enter_live_plots()
+            v = self._live_view()
+            self.pendulum_widget.set_state(180.0 + v['angle_deg'], v['pos_mm'])
             mode_names = {0: "SAFE", 1: "ENERGY SWING-UP", 2: "RICCATI LQR BALANCE"}
-            cur_mode = int(self._live_telemetry['mode'])
-            mode_str = mode_names.get(cur_mode, "UNKNOWN")
+            mode_str = mode_names.get(v['mode'], "UNKNOWN")
             self.status_label.setText(
-                f"ONLINE | Mode: {mode_str} | Ang: {math.degrees(self._live_telemetry['angle']):+.1f}° "
-                f"E: {self._live_telemetry['energy']:+.2f} Pos: {pos_mm:+.1f}mm"
+                f"ONLINE | Mode: {mode_str} | Ang: {v['angle_deg']:+.1f}° "
+                f"E: {v['energy']:+.2f} Pos: {v['pos_mm']:+.1f}mm"
             )
+            self._update_live_plots(v)
         elif self._sim_result is not None:
             # Simulation playback
             n = len(self._sim_result['time'])
@@ -817,6 +975,7 @@ class PipelineMainWindow(QtWidgets.QMainWindow):
                 self.connect_btn.setObjectName("dangerBtn")
                 self.status_label.setText(f"Connected to {port}. Waiting for telemetry...")
                 self._rx_count = 0
+                self._live_plots_active = False
             except Exception as e:
                 QtWidgets.QMessageBox.critical(self, "Connection Error", str(e))
         else:
@@ -827,6 +986,7 @@ class PipelineMainWindow(QtWidgets.QMainWindow):
                 self.connect_btn.setText('Connect ESP32')
                 self.connect_btn.setObjectName("actionBtn")
                 self.status_label.setText("Status: Offline (Local Simulation Active)")
+                self._exit_live_plots()
 
     def _on_packet_received(self, addr, value):
         self._rx_count += 1
