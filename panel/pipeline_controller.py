@@ -435,6 +435,10 @@ class PipelineMainWindow(QtWidgets.QMainWindow):
             QPushButton#dangerBtn:hover { background-color: #f85149; border-color: #ffa198; }
             QPushButton#actionBtn { background-color: #1f6feb; color: white; border: 2px solid #79c0ff; font-size: 13px; }
             QPushButton#actionBtn:hover { background-color: #388bfd; border-color: #a5d6ff; }
+            QCheckBox { color: #ffffff; font-size: 12px; font-weight: bold; spacing: 8px; }
+            QCheckBox::indicator { width: 16px; height: 16px; border: 2px solid #8b949e; border-radius: 3px; background-color: #0d1117; }
+            QCheckBox::indicator:hover { border-color: #c9d1d9; }
+            QCheckBox::indicator:checked { background-color: #1f6feb; border-color: #79c0ff; }
             QScrollArea { border: none; background-color: #0f141c; }
             QWidget#leftPane { background-color: #0f141c; }
             QScrollBar:vertical { background: #0d1117; width: 12px; margin: 0; }
