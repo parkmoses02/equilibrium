@@ -649,7 +649,8 @@ void step6_stepDir() {
 void printMenu() {
     Serial.println();
     Serial.println(F("============================================================"));
-    Serial.println(F("  d = 1~4단계 진단 (모터 안 돎)"));
+    Serial.println(F("  i = SPI ID / SD_MODE 다시 읽기 (코일 출력 끔)"));
+    Serial.println(F("  d = 1~4단계 진단 (코일 출력 켬)"));
     Serial.println(F("  m = 5단계 모션 테스트 - 내부 램프 (모터 회전! 축을 비워두세요)"));
     Serial.println(F("  p = 6단계 STEP/DIR 펄스 테스트 (모터 회전!)"));
     Serial.println(F("  s = 상태 플래그만 다시 읽기"));
@@ -674,13 +675,14 @@ void runDiagnostics() {
 }
 
 void setup() {
+    digitalWrite(PIN_EN, HIGH);
+    pinMode(PIN_EN, OUTPUT);
+    digitalWrite(PIN_EN, HIGH);
     Serial.begin(115200);
     delay(1500);
 
     pinMode(PIN_CS, OUTPUT);
-    pinMode(PIN_EN, OUTPUT);
     digitalWrite(PIN_CS, HIGH);
-    digitalWrite(PIN_EN, HIGH); // 진단 끝날 때까지 출력 비활성
 
     // STEP/DIR 을 띄워두면 노이즈로 원치 않는 스텝이 들어가고 IOIN 판독도
     // 지저분해진다. 내부 램프를 쓰더라도 명시적으로 LOW 로 고정한다.
@@ -697,7 +699,8 @@ void setup() {
     Serial.println(F("############################################################"));
     Serial.println(F("  EN=13  CS=5  SCK=18  MISO=19  MOSI=23"));
 
-    runDiagnostics();
+    Serial.println(F("Boot: read-only SPI probe; motor output disabled."));
+    step1_spiLink();
     printMenu();
 }
 
@@ -705,6 +708,10 @@ void loop() {
     if (!Serial.available()) return;
     char c = Serial.read();
     switch (c) {
+        case 'i':
+            digitalWrite(PIN_EN, HIGH);
+            step1_spiLink();
+            break;
         case 'd': runDiagnostics(); printMenu(); break;
         case 'm': step5_motion();   printMenu(); break;
         case 'p': step6_stepDir();  printMenu(); break;
