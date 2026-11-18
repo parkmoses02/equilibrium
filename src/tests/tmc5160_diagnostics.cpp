@@ -674,6 +674,15 @@ void runDiagnostics() {
     Serial.println(F("  1~4단계 완료. 모터 회전까지 보려면 'm' 입력."));
 }
 
+#if defined(CART_STEP_LOSS)
+#include "cart_step_loss_test.h"
+#elif defined(CART_DISTANCE_TEST)
+#include "cart_distance_test.h"
+#endif
+#ifdef DOUBLE_UPRIGHT
+#include "../double_pendulum/upright.h"
+#endif
+
 void setup() {
     digitalWrite(PIN_EN, HIGH);
     pinMode(PIN_EN, OUTPUT);
@@ -695,6 +704,13 @@ void setup() {
 
     Serial.println();
     Serial.println(F("############################################################"));
+#ifdef DOUBLE_UPRIGHT
+    doubleSetup();return;
+#endif
+#ifdef CART_DISTANCE_TEST
+    cartHelp();
+    return;
+#endif
     Serial.println(F("#                 TMC5160 DIAGNOSTICS                      #"));
     Serial.println(F("############################################################"));
     Serial.println(F("  EN=13  CS=5  SCK=18  MISO=19  MOSI=23"));
@@ -705,6 +721,13 @@ void setup() {
 }
 
 void loop() {
+#ifdef DOUBLE_UPRIGHT
+    doubleLoop();return;
+#endif
+#ifdef CART_DISTANCE_TEST
+    cartLoop();
+    return;
+#endif
     if (!Serial.available()) return;
     char c = Serial.read();
     switch (c) {

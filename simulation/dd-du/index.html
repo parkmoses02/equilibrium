@@ -1,0 +1,183 @@
+<!doctype html><html lang="ko"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>DD → DU 궤적 탐색</title><div id="du-lab">
+<style>
+#du-lab{font-family:system-ui,sans-serif;max-width:880px;margin:auto;color:var(--foreground,CanvasText);display:grid;gap:.8rem}
+#du-lab svg{width:100%;height:auto;display:block}#du-lab .toolbar{display:flex;align-items:center;flex-wrap:wrap;gap:.65rem}#du-lab input[type=range]{flex:1;min-width:100px}#du-lab output{font-variant-numeric:tabular-nums}#du-lab label{display:inline-flex;align-items:center;gap:.4rem}#du-lab svg text{fill:currentColor;font:12px system-ui}#du-lab .rail{stroke:currentColor;opacity:.4}#du-lab .base{stroke:var(--viz-series-1,#447ab9)}#du-lab .tip{stroke:var(--viz-series-2,#d87d35)}
+</style>
+<header><h2>DD → DU 궤적 탐색</h2><span>실측 모델 · 카트 ±30 cm · 0.8 m/s · 16 m/s² 이내</span></header>
+<div class="toolbar"><button class="btn btn-primary" data-id="run">탐색 시작</button><output data-id="status" aria-live="polite"></output></div>
+<div class="toolbar"><label>후보 <select class="form-select" data-id="candidate"></select></label>
+<label>재검증 <select class="form-select" data-id="case"><option value="nominal">기준 모델</option><option value="offset">첫 링크 초기각 +1°</option><option value="delay">가속도 응답 5 ms 지연</option></select></label></div>
+<svg viewBox="0 0 720 325" role="img" aria-label="레일 위의 카트, 첫 링크와 끝 링크의 실제 계산 자세">
+<path class="rail" d="M105 153H615 M105 143V163 M360 147V159 M615 143V163"/><text x="78" y="182">−30 cm</text><text x="591" y="182">+30 cm</text>
+<rect data-id="cart" width="36.55" height="13" rx="3" y="140" fill="currentColor"/>
+<path data-id="arm1" class="base" stroke-width="6" fill="none"/><path data-id="arm2" class="tip" stroke-width="5" fill="none"/>
+<circle data-id="joint" r="6" fill="currentColor"/><circle data-id="mass" r="5" fill="currentColor"/>
+</svg>
+<div class="toolbar"><button class="btn" data-id="play">재생</button><input class="form-range" data-id="time" type="range" min="0" value="0" aria-label="궤적 시간"><output data-id="clock"></output></div>
+<output data-id="state"></output><output data-id="result"></output>
+<small>포착 판정은 계획 끝에서 한 번. 모델: 마찰 없음 · 카트 가속도 입력 · 포착 후 엔코더 양자화 및 5 ms LQR. 실기 결과 아님.</small>
+</div>
+<script>
+// SI units. State: cart x, absolute base/tip angles from up, cart v, angular rates.
+const pi=Math.PI, dt=.005, stride=24, N=13;
+const B=.002475,S=.0128,C=.16*B,g=9.80665;
+const J2=B*g*(.792172/(2*pi))**2,J1=S*g*(.930958/(2*pi))**2-J2-2*C;
+const wrap=a=>Math.atan2(Math.sin(a),Math.cos(a)),clip=(x,l)=>Math.max(-l,Math.min(l,x));
+function deriv(y,u,drag){
+  const [,a,b,v,w,z]=y,h=C*Math.cos(a-b),s=C*Math.sin(a-b),det=J1*J2-h*h;
+  // Absolute link coordinates: elbow torque acts equally and oppositely.
+  const elbow=drag?drag.b2*(z-w):0;
+  const f=(S-B)*(g*Math.sin(a)-u*Math.cos(a))-s*z*z+elbow-(drag?drag.b1*w:0);
+  const k=B*(g*Math.sin(b)-u*Math.cos(b))+s*w*w-elbow;
+  return [v,w,z,u,(J2*f-h*k)/det,(J1*k-h*f)/det];
+}
+function rk(y,u,h,drag){
+  const add=(a,b,t)=>a.map((v,i)=>v+t*b[i]);
+  const a=deriv(y,u,drag),b=deriv(add(y,a,h/2),u,drag),c=deriv(add(y,b,h/2),u,drag),d=deriv(add(y,c,h),u,drag);
+  return y.map((v,i)=>v+h*(a[i]+2*b[i]+2*c[i]+d[i])/6);
+}
+const K=[-3.464102,78.817707,-116.908943,-4.688550,6.365765,-13.358312];
+// Linearize the 5 ms plant step along the nominal path, then solve finite-horizon
+// discrete LQR backwards. No perturbed-state data is used to design the gains.
+function makeTracker(knots){
+  const frames=sim(knots,true,2).frames, n=(N+1)*stride, eps=1e-5;
+  const Q=[12,60,60,2,2,2],dot=(a,b)=>a.reduce((v,x,i)=>v+x*b[i],0);
+  let P=Q.map((q,i)=>Q.map((_,j)=>i===j?q*2:0)),gains=Array(n);
+  for(let t=n-1;t>=0;t--){
+    const y=frames[t].slice(1,7),u=frames[t+1][7];
+    const cols=Array.from({length:7},(_,j)=>{
+      const lo=y.slice(),hi=y.slice();if(j<6){lo[j]-=eps;hi[j]+=eps;}
+      const l=rk(lo,u-(j===6?eps:0),dt),h=rk(hi,u+(j===6?eps:0),dt);
+      return h.map((x,i)=>(x-l[i])/(2*eps));
+    });
+    const b=cols.pop(),pb=P.map(row=>dot(row,b)),den=dt+dot(b,pb);
+    const pa=cols.map(a=>P.map(row=>dot(row,a))),s=cols.map(a=>dot(a,pb));
+    gains[t]=s.map(v=>v/den);
+    P=cols.map((a,i)=>cols.map((_,j)=>dot(a,pa[j])-s[i]*s[j]/den+(i===j?dt*Q[i]:0)));
+  }
+  return {frames,gains};
+}
+function sim(knots,record=false,sub=1,variant='nominal',tracker=null,drag=null){
+  if(drag && ![drag.b1,drag.b2].every(x=>Number.isFinite(x)&&x>=0))throw Error('b1,b2 must be nonnegative N m s/rad');
+  let y=[0,pi+(variant==='offset'?pi/180:0),pi,0,0,0],maxX=0,maxV=0,maxA=0,t=0,frames=[],pending=0;
+  function advance(u){
+    if(variant==='delay'){const prev=pending;pending=u;u=prev;}
+    u=(clip(y[3]+dt*u,.8)-y[3])/dt;
+    for(let j=0;j<sub;j++)y=rk(y,u,dt/sub,drag);
+    t++;maxX=Math.max(maxX,Math.abs(y[0]));maxV=Math.max(maxV,Math.abs(y[3]));maxA=Math.max(maxA,Math.abs(u));
+    if(record)frames.push([t*dt,...y,u]);
+  }
+  if(record)frames.push([0,...y,0]);
+  let prev=0,prior=null,rate=[0,0];
+  for(const next of [...knots,0]){
+    const u=(next-prev)/(stride*dt); prev=next;
+    for(let i=0;i<stride;i++){
+      let command=u;
+      if(tracker){
+        const ref=tracker.frames[t],q=2*pi/4000,quant=x=>Math.round(x/q)*q;
+        const base=pi+quant(y[1]-pi),tip=base+quant(y[2]-y[1]);
+        const angles=[wrap(base-ref[2]),wrap(tip-ref[3])];
+        if(prior)rate=rate.map((w,j)=>.6*w+.4*wrap(angles[j]-prior[j])/dt);
+        prior=angles;
+        const e=[y[0]-ref[1],...angles,y[3]-ref[4],...rate];
+        command=clip(u-tracker.gains[t].reduce((s,k,j)=>s+k*e[j],0),16);
+      }
+      advance(command);
+    }
+  }
+  const end=y.slice(),ea=wrap(y[1]-pi),eb=wrap(y[2]);
+  const residual=[6*y[0],ea,eb,.16*y[4],.16*y[5],20*Math.max(0,maxX-.26)];
+  const score=residual.reduce((v,x)=>v+x*x,0);
+  let caught=false,held=false;
+  if(record && Math.max(Math.abs(ea),Math.abs(eb))<.05 && Math.max(Math.abs(y[4]),Math.abs(y[5]))<.5 && Math.abs(y[3])<=.25 && maxX<.28){
+    caught=true;
+    const quantum=2*pi/4000, quant=a=>Math.round(a/quantum)*quantum;
+    function enc(){let base=quant(y[1]-pi);return [wrap(base),wrap(pi+base+quant(y[2]-y[1]))];}
+    let [pa,pb]=enc(),wa=0,wb=0;
+    for(let i=0;i<400;i++){
+      const [a,b]=enc();
+      if(Math.max(Math.abs(a),Math.abs(b))>.17 || Math.abs(y[0])>=.30)break;
+      wa=.6*wa+.4*wrap(a-pa)/dt;wb=.6*wb+.4*wrap(b-pb)/dt;pa=a;pb=b;
+      const state=[y[0],a,b,y[3],wa,wb];
+      const req=-state.reduce((sum,x,j)=>sum+x*K[j],0);
+      advance((clip(y[3]+dt*clip(req,12),.8)-y[3])/dt);
+      held=i===399 && Math.max(Math.abs(wrap(y[1]-pi)),Math.abs(wrap(y[2])))<=.17 && maxX<.30;
+    }
+  }
+  return {frames,score,residual,end,ea,eb,caught,held,maxX,maxV,maxA};
+}
+// Damped least-squares shooting, constrained velocity knots. Multiple deterministic starts.
+function solve(M,b){
+  let a=M.map((r,i)=>[...r,b[i]]),n=b.length;
+  for(let j=0;j<n;j++){
+    let p=j;for(let i=j+1;i<n;i++)if(Math.abs(a[i][j])>Math.abs(a[p][j]))p=i;
+    [a[j],a[p]]=[a[p],a[j]];let s=a[j][j];for(let k=j;k<=n;k++)a[j][k]/=s;
+    for(let i=0;i<n;i++)if(i!==j){let v=a[i][j];for(let k=j;k<=n;k++)a[i][k]-=v*a[j][k];}
+  }
+  return a.map(r=>r[n]);
+}
+function* search(seed=1){
+ let random=()=>((seed=(1664525*seed+1013904223)>>>0)/4294967296),best=Infinity;
+ for(let trial=0;trial<60;trial++){
+  let v=Array.from({length:N},()=>1.5*(random()-.5)),lam=.03;
+  for(let it=0;it<55;it++){
+    let z=sim(v),r=z.residual;
+    if(z.score<best){
+      best=z.score;let test=sim(v,true,2);
+      yield {trial,it,v:v.slice(),result:test};
+      if(test.held && best<.001)return;
+    }else yield null;
+    let J=v.map((x,i)=>{let w=v.slice();w[i]+=.00002;return sim(w).residual.map((y,j)=>(y-r[j])/.00002);});
+    const M=r.map((_,i)=>r.map((_,j)=>J.reduce((s,row)=>s+row[i]*row[j],i===j?lam:0)));
+    const d=solve(M,r),next=v.map((x,i)=>clip(x-J[i].reduce((s,y,j)=>s+y*d[j],0),.8));
+    if(sim(next).score<z.score){v=next;lam=Math.max(.0001,lam*.7);}else lam*=3;
+    if(lam>1e6)break;
+  }
+ }
+}
+if(typeof module!=="undefined")module.exports={search,sim,dt,stride,N,makeTracker};
+
+;(()=>{
+const root=document.getElementById('du-lab'),el=k=>root.querySelector('[data-id="'+k+'"]');
+let bank=[],traj=null,gen=null,running=false,playing=false,frame=0,last=0,iter=0;
+const stopAt=(N+1)*stride,deg=x=>wrap(x)*180/Math.PI;
+function draw(){
+ const [t,x,a,b,v,w,z,u]=traj.frames[frame],cx=360+850*x,cy=146;
+ // Equal physical scale on both axes; camera follows the rail, not the cart.
+ const jx=cx+136*Math.sin(a),jy=cy-136*Math.cos(a),ex=jx+140.25*Math.sin(b),ey=jy-140.25*Math.cos(b);
+ const svg=el('cart').ownerSVGElement;svg.setAttribute('viewBox','0 -152 720 610');
+ el('cart').setAttribute('x',cx-36.55/2);
+ for(const [k,x1,y1,x2,y2] of [['arm1',cx,cy,jx,jy],['arm2',jx,jy,ex,ey]])el(k).setAttribute('d','M'+x1+' '+y1+'L'+x2+' '+y2);
+ for(const [k,px,py] of [['joint',jx,jy],['mass',ex,ey]]){el(k).setAttribute('cx',px);el(k).setAttribute('cy',py);}
+ el('time').value=frame;el('clock').textContent=t.toFixed(2)+' s · '+(frame>stopAt?'e 평형 유지':'스윙업');
+ el('state').textContent='카트 '+(x*100).toFixed(1)+' cm  ·  속도 '+v.toFixed(2)+' m/s  ·  가속도 '+u.toFixed(1)+' m/s²';
+ el('result').textContent=(traj.held?'DU 포착 · 2초 유지 성공':traj.caught?'포착 후 유지 실패':'DU 미포착')+'  |  포착 시점 목표 오차: 첫 링크 '+deg(traj.ea).toFixed(1)+'°, 끝 링크 '+deg(traj.eb).toFixed(1)+'°  |  각속도 '+traj.end[4].toFixed(2)+' / '+traj.end[5].toFixed(2)+' rad/s';
+}
+function choose(reset=true){
+ traj=sim(bank[+el('candidate').value].v,true,2,el('case').value);
+ frame=reset?0:Math.min(frame,traj.frames.length-1);el('time').max=traj.frames.length-1;draw();
+}
+function add(v,label){let i=bank.push({v})-1;el('candidate').add(new Option(label,i));el('candidate').value=i;choose(false);}
+function play(on){playing=on;el('play').textContent=on?'일시정지':'재생';last=performance.now();}
+function tick(now){
+ if(playing && now-last>=dt*1000){let n=Math.floor((now-last)/(dt*1000));last+=n*dt*1000;frame=Math.min(frame+n,traj.frames.length-1);draw();if(frame===traj.frames.length-1)play(false);}
+ requestAnimationFrame(tick);
+}
+function work(){
+ if(!running)return;const until=performance.now()+25;
+ do{let step=gen.next();if(step.done){running=false;el('run').textContent='처음부터 다시 탐색';el('status').textContent='탐색 종료 · 개선 후보 '+(bank.length-1)+'개';frame=0;choose();play(true);return;}
+ iter++;if(step.value){const c=step.value;add(c.v,'후보 '+bank.length+' · 비용 '+c.result.score.toFixed(4));}
+ }while(performance.now()<until);
+ el('status').textContent='탐색 중 · 반복 '+iter+' · 개선 후보 '+(bank.length-1)+'개';setTimeout(work,10);
+}
+el('run').onclick=()=>{if(running){running=false;el('run').textContent='탐색 계속';el('status').textContent='탐색 일시정지';return;}
+ if(!gen||el('run').textContent.includes('처음')){gen=search();bank.length=0;el('candidate').length=0;add(Array(N).fill(0),'초기 · 정지');iter=0;}
+ running=true;el('run').textContent='탐색 일시정지';play(true);work();};
+el('candidate').onchange=()=>{if(running)el('run').click();choose();play(true);};
+el('case').onchange=()=>{if(running)el('run').click();choose();play(true);};
+el('play').onclick=()=>{if(frame===traj.frames.length-1)frame=0;play(!playing);draw();};
+el('time').oninput=()=>{play(false);frame=+el('time').value;draw();};
+add(Array(N).fill(0),'초기 · 정지');el('status').textContent='DD 정지 상태';requestAnimationFrame(tick);
+})();
+</script>
+</html>
