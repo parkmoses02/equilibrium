@@ -1,0 +1,14 @@
+
+This directory is intended for PlatformIO Test Runner and project tests.
+
+Unit Testing is a software testing method by which individual units of
+source code, sets of one or more MCU program modules together with associated
+control data, usage procedures, and operating procedures, are tested to
+determine whether they are fit for use. Unit testing finds problems early
+in the development cycle.
+
+More information about PlatformIO Unit Testing:
+- https://docs.platformio.org/en/latest/advanced/unit-testing/index.html
+
+
+1. 내가 쓰던 제어의 정체: PID가 아니라 '상태 피드백 제어'처음에 4개의 게인 값(kpa, kda, kpm, kdm)을 보고 PID 제어인 줄 알았지만, 사실 이 구조는 LQR(Linear Quadratic Regulator) 알고리즘에서 도출되는 전형적인 전상태 피드백 제어(Full State-Feedback Control)입니다.PID 제어와의 차이점: 오차를 누적하는 적분(I) 항이 없습니다.작동 원리: 시스템의 현재 상태를 나타내는 4가지 변수(진자 각도, 진자 각속도, 카트 위치, 카트 속도)를 모두 실시간으로 감시하고, 각각에 최적화된 가중치(Gain, $K$)를 곱해 더해서 최종 모터 제어 신호를 만듭니다.게인의 역할: * kpa: 진자가 넘어지려는 각도에 비례해 버티는 힘kda: 진자가 앞뒤로 출렁거리는 진동을 잡아주는 브레이크(미분)kpm: 카트를 목표 위치(레일 중앙)로 돌려보내는 힘kdm: 카트가 목표 위치에 도달할 때 부드럽게 멈추게 하는 브레이크2. 마법의 K값을 찾는 LQR과 '리카티(Riccati)'4개의 게인을 수동으로 맞추는 것은 변수들끼리 서로 싸우기 때문에(위치를 잡으려다 진자가 넘어짐) 극도로 어렵습니다. 이를 수학적으로 해결해 주는 것이 LQR입니다.Q 매트릭스와 R 매트릭스: 사용자가 시스템에 내리는 '목표 지시서'입니다.$Q$: "위치는 좀 틀려도 되니까 각도(q0)는 무조건 0도로 꼿꼿하게 세워!" (목표 엄격성)$R$: "모터 에너지를 너무 많이 쓰지 말고 부드럽게 움직여." (에너지 효율)비용 함수 (Cost Function): 시스템의 흔들림과 모터 에너지 소모량을 점수로 매긴 수학 공식입니다.$$J = \int_{0}^{\infty} (x^T Q x + u^T R u) dt$$Riccati Integration (리카티 적분값): 슬라이더를 움직일 때 변하던 그 숫자의 정체입니다. 내가 설정한 게인 값으로 시뮬레이션을 돌렸을 때, 위 비용 함수($J$)의 점수가 얼마나 나오는지 채점한 결과입니다. 이 값이 무한대(DIVERGED)로 가면 진자가 넘어졌다는 뜻이고, 작을수록 안정적이고 우수하게 제어되었다는 뜻입니다.3. 질량(Mass)이 사라진 이유: 가속도 제어 모델도립진자 수식을 세울 때 보통 카트의 무게와 진자의 무게를 알아야 합니다. 하지만 우리 코드에서는 질량을 몰라도 완벽한 제어가 가능했습니다. 그 이유는 사용하는 하드웨어의 특성 때문이었습니다.DC 모터 (힘 제어): $F = ma$에 의해, 카트가 무거우면 똑같은 전류를 줘도 덜 움직입니다. 따라서 수학 모델에 질량이 반드시 들어가야 합니다.스텝 모터 (가속도 제어): 펌웨어 코드(tmc.setAccelerationMax)를 보면 모터의 가속도를 직접 제어합니다. 모터가 알아서 지정된 가속도를 무조건 맞춰주기 때문에, 물리 수식에서 질량 항이 모두 약분되어 사라집니다.결론: 시스템의 움직임은 오직 진자의 길이($L$)와 중력 가속도($g$) 두 가지만으로 결정되는 우아한 물리 모델로 단순화되었습니다.4. 시뮬레이션이 우주로 발산(폭발)했던 2가지 이유가장 고생했던 부분이자, 제어공학을 시뮬레이션할 때 가장 흔하게 겪는 함정들입니다.Radian vs Degree 단위 충돌수학 공식(행렬)은 무조건 라디안(Radian) 기반으로 돌아갑니다.UI에서 입력한 12도를 라디안으로 바꾸지 않고 그대로 수식에 넣으면, 컴퓨터는 진자가 12 라디안(약 687도) 꺾여있다고 착각하여 모터에 어마어마한 출력을 때려버립니다.부호(Sign)의 방향성 문제수학적 표준: LQR 공식은 제어 입력 $u$를 구할 때 $u = -Kx$ 로 마이너스를 붙여서 복원력을 만듭니다.펌웨어 코드: C++ 코드에서는 (kpa * angle + ...) 처럼 플러스(+)를 사용해 더하고 있었습니다.현상: 수학 공식을 맹신하고 코드를 짜면, 펌웨어가 엑셀을 밟아야 할 타이밍에 브레이크를 밟아버려서 진자가 바닥으로 내동댕이쳐집니다. 시뮬레이터와 실제 펌웨어의 부호 규칙을 동기화(마이너스 부호 추가/제거)해 주어야 완벽하게 동작합니다.

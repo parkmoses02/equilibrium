@@ -1,0 +1,35 @@
+### Footprint positions - created on 2026-10-14T20:39:00 ###
+### Printed by KiCad version 10.0.4
+## Unit = mm, Angle = deg.
+## Side : top
+# Ref     Val                                    Package                PosX       PosY       Rot  Side
+BOB_PWR   1x11_FEMALE_2.54mm                     BOB_PWR             90.7000   -55.5600  -90.0000  top
+BOB_SIG   1x11_FEMALE_2.54mm                     BOB_SIG             90.7000   -20.0000  -90.0000  top
+C1        100nF_16V_X7R                          C1                  23.0000   -13.1900   90.0000  top
+C2        100nF_16V_X7R                          C2                  23.0000   -26.1900   90.0000  top
+C3        10uF_10V_X7R                           C3                  18.0000   -75.0000    0.0000  top
+ESP_L     1x20_2.54mm_FEMALE_SOCKET              ESP_L               27.8400   -15.0000    0.0000  top
+ESP_R     1x20_2.54mm_FEMALE_SOCKET              ESP_R               53.2400   -15.0000    0.0000  top
+H1        M3_MOUNT                               H1                   8.0000    -8.0000    0.0000  top
+H2        M3_MOUNT                               H2                 102.0000    -8.0000    0.0000  top
+H3        M3_MOUNT                               H3                  10.0000   -78.0000    0.0000  top
+H4        M3_MOUNT                               H4                 102.0000   -78.0000    0.0000  top
+J1        24V_INPUT:_1=GND_2=+24V                J1                  77.0000    -8.0000    0.0000  top
+J2        SPARE_GPIO_/_1x8_2.54mm_FEMALE_SOCKET  J2                  10.0000   -30.2400    0.0000  top
+J3        LEGACY_ENCODER_3V3                     J3                  10.0000   -59.0000    0.0000  top
+J4        JST-PH_B4B-PH-K_4-pin_2.00mm_MALE      J4                  83.0000   -80.0000    0.0000  top
+J5        DUAL_HEDS_5V                           J5                  18.0000   -80.0000   90.0000  top
+J6        MOTOR_ENCODER_3V3_ONLY                 J6                  59.0000   -80.0000   90.0000  top
+J7        DIAG0_/_GND                            J7                  98.0000   -63.0000    0.0000  top
+R1        R_A_PULLUP_4K7                         R1                  18.5000   -43.0000    0.0000  top
+R2        R_B_PULLUP_4K7                         R2                  18.5000   -47.0000    0.0000  top
+R3        R_A_SERIES_100R                        R3                  18.5000   -51.0000    0.0000  top
+R4        R_B_SERIES_100R                        R4                  18.5000   -55.0000    0.0000  top
+R5        10k_EN_default_OFF                     R5                  65.0000   -14.0000    0.0000  top
+R6        100k_STEP_pull-down                    R6                  60.0000   -25.0000   90.0000  top
+R7        100k_DIR_pull-down                     R7                  60.0000   -29.0000   90.0000  top
+R8        100R                                   R8                  24.0000   -32.0000   90.0000  top
+R9        100R                                   R9                  24.0000   -36.0000   90.0000  top
+U3        SN74LVC14AD                            U3                  18.0000   -17.0000    0.0000  top
+U4        SN74LVC14AD                            U4                  18.0000   -30.0000    0.0000  top
+## End

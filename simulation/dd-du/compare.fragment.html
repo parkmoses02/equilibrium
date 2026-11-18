@@ -1,0 +1,32 @@
+<div id="du-track-ab">
+<h2>DD → DU · 첫 링크 +1°</h2>
+<div>실선: 엔코더 보정　 점선: 기존 지령 재생</div>
+<svg viewBox="-420 -205 840 410" style="width:100%;max-height:365px" role="img" aria-label="동일한 초기 조건에서 두 제어 방식의 카트와 진자 운동">
+<path d="M-150 0H150 M-150 -4V5 M150 -4V5" fill="none" stroke="currentColor" opacity=".5"/>
+<g data-arm="1" stroke="var(--viz-series-1,currentColor)"><rect y="-4" width="21.5" height="8" fill="none"/><path fill="none" stroke-width="4"/></g>
+<g data-arm="0" stroke="currentColor" opacity=".7"><rect y="-4" width="21.5" height="8" fill="none" stroke-dasharray="3 2"/><path fill="none" stroke-width="2" stroke-dasharray="5 3"/></g>
+</svg>
+<div class="viz-controls"><button class="btn btn-primary" id="du-ab-play">처음부터 재생</button><label class="form-label">시간 <output></output><input class="form-range" type="range" min="0" step="1" aria-label="두 궤적의 공통 시간"></label></div>
+<div data-state></div>
+</div>
+<script>
+;(()=>{
+const runs=/*RUNS*/,root=document.getElementById('du-track-ab'),bar=root.querySelector('input'),btn=root.querySelector('button');
+const end=runs[1].length-1,cap=runs[0].length-1;let frame=cap,start=0,playing=false;
+bar.max=end;
+function render(){
+ bar.value=frame;root.querySelector('output').textContent=(frame*.005).toFixed(2)+' s';
+ runs.forEach((r,i)=>{
+   const g=root.querySelector('[data-arm="'+i+'"]');g.style.display=frame<r.length?'':'none';if(frame>=r.length)return;
+   const [x,a,b]=r[frame],cx=500*x,jx=cx+80*Math.sin(a),jy=-80*Math.cos(a);
+   g.querySelector('rect').setAttribute('x',cx-10.75);
+   g.querySelector('path').setAttribute('d','M'+cx+' 0L'+jx+' '+jy+'L'+(jx+82.5*Math.sin(b))+' '+(jy-82.5*Math.cos(b)));
+ });
+ root.querySelector('[data-state]').textContent=frame<cap?'스윙업 궤적 추종':frame===cap?'1.68초 · 기존 미포착 / 보정 DU 포착':frame===end?'3.68초 · 보정 후 2초 유지 완료':'기존 시험 종료 / 보정 후 e 평형 제어 중';
+}
+function tick(t){if(!playing)return;frame=Math.min(end,Math.floor((t-start)/5));render();if(frame===end){playing=false;btn.textContent='다시 재생';}else requestAnimationFrame(tick);}
+btn.onclick=()=>{if(playing){playing=false;btn.textContent='계속 재생';return;}if(btn.textContent!=='계속 재생'||frame===end)frame=0;playing=true;btn.textContent='일시정지';start=performance.now()-frame*5;requestAnimationFrame(tick);};
+bar.oninput=()=>{playing=false;btn.textContent='계속 재생';frame=+bar.value;render();};
+render();
+})();
+</script>
