@@ -276,4 +276,11 @@ static void doubleLoop(){
 #endif
     writeRegister(REG_VMAX,velocityToInternal(lroundf(fabsf(vCmd)*SCALE)));
     writeRegister(REG_RAMPMODE,vCmd>=0?1:2);
+    // Best effort, 20 Hz. Never wait for serial bandwidth in the control loop.
+    static uint32_t lastPose;
+    if(now-lastPose>=50000u && Serial.availableForWrite()>=72){
+        lastPose=now;
+        float base,tip;absoluteAngles(base,tip);
+        Serial.printf("POSE,%lu,%c,%.5f,%.5f,%.5f\n",(unsigned long)now,swinging?'s':mode->key,x,base,tip);
+    }
 }
