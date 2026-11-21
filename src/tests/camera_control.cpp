@@ -729,11 +729,22 @@ static ShEst shUpdate(const ShEst& e, float z) {
     return n;
 }
 
+// Outlier gate: a camera packet whose angle differs from the estimate at its own frame time by more than
+// SH_GATE_RAD is rejected (a half-covered marker or a wrong marker gives a wrong angle; with R = (1 deg)^2 the filter
+// would follow it). After SH_RESYNC_REJECTS rejected packets in a row the filter re-syncs on the camera instead.
+// Balancing innovations are < 1.5 deg. The time of the last ACCEPTED packet drives the camera-lost timeout.
+constexpr float SH_GATE_RAD = 6.0f * 0.017453293f;
+constexpr int SH_RESYNC_REJECTS = 10;                  // ~0.11 s of packets at 90 fps
+static int shRejectRun = 0;
+static uint32_t shRejects = 0;                         // rejected packets in the current second
+static uint32_t shLastValidUs = 0;                     // last accepted camera packet
+
 static void shEstimatorTick(float a, bool hasZ, float z, int lag) {
     if (hasZ && !shInit) {
         const ShEst e0 = {z, 0.0f, 1.0f, 0.0f, 100.0f};
         for (int i = 0; i < SH_HIST; i++) { shHist[i].e = e0; shHist[i].a = 0.0f; }
         shInit = true;
+        shLastValidUs = micros();
     }
     if (!shInit) return;
     const int prev = shIdx;
@@ -744,15 +755,21 @@ static void shEstimatorTick(float a, bool hasZ, float z, int lag) {
     if (lag < 0) lag = 0;
     if (lag > SH_MAX_LAG) lag = SH_MAX_LAG;
     int k = (shIdx - lag + SH_HIST) % SH_HIST;
-    shHist[k].e = shUpdate(shHist[k].e, z);
+    if (fabsf(wrapPi(z - shHist[k].e.phi)) > SH_GATE_RAD) {
+        shRejects++;
+        if (++shRejectRun < SH_RESYNC_REJECTS) return;         // ignore this packet
+        shHist[k].e = {z, 0.0f, 1.0f, 0.0f, 100.0f};           // the estimate is lost: restart from the camera
+    } else {
+        shHist[k].e = shUpdate(shHist[k].e, z);
+    }
+    shRejectRun = 0;
+    shLastValidUs = micros();
     while (k != shIdx) {
         const int nxt = (k + 1) % SH_HIST;
         shHist[nxt].e = shPredict(shHist[k].e, shHist[nxt].a);
         k = nxt;
     }
 }
-
-static uint32_t shLastValidUs = 0;
 
 static bool camEstimate(float& phi, float& w, uint32_t& ageMs) {
     if (!shInit) return false;
@@ -793,7 +810,6 @@ static void shHandlePacket() {
     const uint16_t age = shBuf[11] | (shBuf[12] << 8);
     if (!(flags & 0x01) || angle == (int16_t)0x8000) return;
     shPktValid++;
-    shLastValidUs = micros();
     const float camRad = angle * 0.01f * 0.017453293f;
     shPendingZ = camCalibrate(wrapPi(SH_CAM_SIGN * camRad));
     shZHold = shPendingZ;
@@ -895,12 +911,12 @@ static void shReport() {
             auto rms = [](double s, uint32_t n) { return n ? sqrtf((float)(s / n)) : 0.0f; };
             auto mean = [](double s, uint32_t n) { return n ? (float)(s / n) : 0.0f; };
             len = snprintf(line, sizeof(line),
-                "# SH m%d all %.2f/%.2f b%+.2f deg w%.2f | up %.2f/%.2f b%+.2f w%.2f max%.1f n%lu | ctr %.2f b%+.2f n%lu | %lu/%luus v%lu\n",
+                "# SH m%d all %.2f/%.2f b%+.2f w%.2f | up %.2f/%.2f b%+.2f w%.2f max%.1f n%lu | ctr %.2f b%+.2f n%lu | %lu/%luus v%lu r%lu\n",
                 (int)pipelineMode, rms(shAll.e2, shAll.n) * d, rms(shAll.raw2, shAll.nRaw) * d, mean(shAll.esum, shAll.n) * d,
                 rms(shAll.w2, shAll.nW), rms(shUp.e2, shUp.n) * d, rms(shUp.raw2, shUp.nRaw) * d, mean(shUp.esum, shUp.n) * d,
                 rms(shUp.w2, shUp.nW), shUp.emax * d, (unsigned long)shUp.n, rms(shCtr.e2, shCtr.n) * d,
                 mean(shCtr.esum, shCtr.n) * d, (unsigned long)shCtr.n,
-                shTicks ? (unsigned long)(shTickSumUs / shTicks) : 0UL, (unsigned long)shTickMaxUs, (unsigned long)shPktValid);
+                shTicks ? (unsigned long)(shTickSumUs / shTicks) : 0UL, (unsigned long)shTickMaxUs, (unsigned long)shPktValid, (unsigned long)shRejects);
             // snprintf reports the length it WOULD have written: never read past the buffer
             if (len >= (int)sizeof(line)) len = (int)sizeof(line) - 1;
         }
@@ -908,7 +924,7 @@ static void shReport() {
         // can occupy the FIFO at the moment the line is due (the phase between the two drifts), so wait a few
         // milliseconds for room instead of dropping the line.
         if (len > 0 && Serial.availableForWrite() < len) {
-            if (len <= 124) {            // fits the 128-byte FIFO once the telemetry has drained: retry
+            if (len <= 127) {            // fits the 128-byte FIFO once the telemetry has drained: retry (length <= 127)
                 pending = true;
                 return;
             }
@@ -923,6 +939,7 @@ static void shReport() {
     shCtr = ShStat();
     shTickSumUs = shTickMaxUs = shTicks = 0;
     shPktOk = shPktValid = 0;
+    shRejects = 0;
 }
 
 static void shBegin() {
