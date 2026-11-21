@@ -39,6 +39,15 @@ def extract_lines(chunk):
     return out
 
 
+STALL_S = 2.0
+
+
+def stalled(now, last_rx, last_warn, limit=STALL_S):
+    """True when the ESP32 has been silent for `limit` s (its telemetry alone arrives at 50 Hz) and we have not
+    warned during the last `limit` s."""
+    return now - last_rx > limit and now - last_warn > limit
+
+
 def main():
     if len(sys.argv) < 2:
         print(__doc__)
@@ -57,14 +66,25 @@ def main():
     tty.setcbreak(sys.stdin.fileno())
     print("keys: Z zero | E shadow stats | S swing-up | A balance | X/space stop | q quit\r")
     buf = b""
+    last_rx = last_warn = time.time()
     try:
         while True:
             r, _, _ = select.select([fd, sys.stdin], [], [], 0.05)
+            now = time.time()
+            if stalled(now, last_rx, last_warn):
+                last_warn = now
+                print(f"\r!!! NO DATA from the ESP32 for {now - last_rx:.0f} s: the USB link is probably down. "
+                      f"The controller keeps running and X cannot reach it: stop with the DRIVER POWER SWITCH if needed.\r")
             if fd in r:
                 try:
                     chunk = os.read(fd, 4096)
                 except BlockingIOError:
                     chunk = b""
+                except OSError as e:
+                    print(f"\r!!! serial read failed ({e}): the USB device is gone. Controller state unknown: use the DRIVER POWER SWITCH.\r")
+                    break
+                if chunk:
+                    last_rx = now
                 buf = (buf + chunk)[-4096:]
                 # report each message once: cut the buffer after the last newline
                 cut = buf.rfind(b"\n")
@@ -80,7 +100,10 @@ def main():
                 ch = sys.stdin.read(1)
                 if ch in ("q", "Q", "\x03"):
                     break
-                os.write(fd, ch.encode())
+                try:
+                    os.write(fd, ch.encode())
+                except OSError as e:
+                    print(f"\r!!! could not send '{ch}' ({e}): the USB link is down. Use the DRIVER POWER SWITCH.\r")
     except KeyboardInterrupt:
         pass
     finally:
