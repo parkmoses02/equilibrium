@@ -3,6 +3,8 @@
 
   capture:  python tools/cart_accel_fit.py capture <port> <out.log>
   analyze:  python tools/cart_accel_fit.py analyze <out.log>
+  static:   python tools/cart_accel_fit.py static <port> <seconds> <out.log>   (NO motion: slide the cart by hand)
+  pxsegments: python tools/cart_accel_fit.py pxsegments <out.log>              (resting camera x positions)
 
 capture hangs the pendulum still (you do that), zeroes the encoder, logs, runs the cart chirp and
 sends a keep-alive byte every 0.2 s; Ctrl+C / a crash of this tool stops the cart within 1 s
@@ -110,6 +112,78 @@ def capture(port, out_path):
             f.write(data)
         n_lines = data.count(b"\n")
         print(f"saved {len(data)} bytes, {n_lines} lines -> {out_path}")
+    return 0
+
+
+def capture_static(port, seconds, out_path):
+    """No motion: logs the camera packets while YOU slide the cart by hand (driver stays disabled)."""
+    import termios
+    fd = os.open(port, os.O_RDWR | os.O_NOCTTY | os.O_NONBLOCK)
+    attrs = termios.tcgetattr(fd)
+    attrs[0] = attrs[1] = attrs[3] = 0
+    attrs[2] = termios.CS8 | termios.CREAD | termios.CLOCAL
+    attrs[4] = attrs[5] = termios.B921600
+    attrs[6][termios.VMIN] = 0
+    attrs[6][termios.VTIME] = 0
+    termios.tcsetattr(fd, termios.TCSANOW, attrs)
+    termios.tcflush(fd, termios.TCIOFLUSH)
+    data = bytearray()
+    os.write(fd, b"l")                 # logging only; 'g' is never sent, so the cart cannot move
+    end = time.time() + seconds
+    try:
+        while time.time() < end:
+            try:
+                chunk = os.read(fd, 65536)
+            except BlockingIOError:
+                chunk = b""
+            if chunk:
+                data.extend(chunk)
+            else:
+                time.sleep(0.002)
+    except KeyboardInterrupt:
+        pass
+    os.write(fd, b"l")
+    time.sleep(0.3)
+    try:
+        data.extend(os.read(fd, 65536))
+    except BlockingIOError:
+        pass
+    os.close(fd)
+    with open(out_path, "wb") as f:
+        f.write(data)
+    n_lines = data.count(b"\n")
+    print(f"saved {len(data)} bytes, {n_lines} lines -> {out_path}")
+
+
+def px_segments(path):
+    """Resting positions of the camera cart x (px): where the cart stayed still, with its mean x."""
+    S, C = parse(path)
+    if len(C) < 100:
+        print("not enough camera packets (is pend_cam running with --uart?)")
+        return 1
+    t = rel_time(C[:, 0], int(C[0, 0]))
+    ok = (C[:, 3] != 65535) & ((C[:, 2] & 0x08) != 0)
+    t, x = t[ok], C[ok, 3] * 0.1
+    segs, i, n = [], 0, len(t)
+    while i < n:
+        j = i
+        while j < n and t[j] - t[i] < 1.0:
+            j += 1
+        if j >= n:
+            break
+        # grow the segment while the cart stays within 1 px of the segment mean
+        while j < n and abs(x[j] - x[i:j].mean()) < 1.0:
+            j += 1
+        if t[j - 1] - t[i] >= 1.5 and x[i:j].std() < 0.6:
+            segs.append((t[i], t[j - 1], x[i:j].mean(), x[i:j].std(), j - i))
+            i = j
+        else:
+            i += 15
+    print(f"camera cart x: {len(t)} valid samples over {t[-1] - t[0]:.1f} s; resting positions (>= 1.5 s still):")
+    for k, (a, b, m, sd, cnt) in enumerate(segs):
+        step = f"   change from previous: {m - segs[k - 1][2]:+7.1f} px" if k else ""
+        print(f"  #{k + 1}: t={a:5.1f}-{b:5.1f} s  x = {m:7.1f} px (std {sd:.2f}, n={cnt}){step}")
+    print("px per real metre = (change in px between two resting positions) / (the distance you slid, in m)")
     return 0
 
 
@@ -221,6 +295,10 @@ if __name__ == "__main__":
         sys.exit(capture(sys.argv[2], sys.argv[3]))
     elif len(sys.argv) >= 3 and sys.argv[1] == "analyze":
         sys.exit(analyze(sys.argv[2]))
+    elif len(sys.argv) >= 5 and sys.argv[1] == "static":
+        capture_static(sys.argv[2], float(sys.argv[3]), sys.argv[4])
+    elif len(sys.argv) >= 3 and sys.argv[1] == "pxsegments":
+        sys.exit(px_segments(sys.argv[2]))
     else:
         print(__doc__)
         sys.exit(1)
