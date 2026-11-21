@@ -34,6 +34,8 @@
 | 경로 | 설명 | 수정 |
 |---|---|---|
 | `src/tests/pipeline_energy_lqr.cpp` | 현재 PC 패널과 연동되는 펌웨어 (스윙업 상태머신 + 리카티 LQR, 500Hz) | 요청 시 |
+| `src/tests/camera_pipeline.cpp` | `pipeline_energy_lqr.cpp` 복사본 + 섀도 카메라 추정기(제어는 아직 엔코더). 키 `E`로 상태 줄 토글. 레일 한계 기본값 0.20 센 m | 요청 시 |
+| `src/tests/uart_*.cpp`, `cart_*.cpp`, `camera_delay_log.cpp`, `camera_estimator*_test.cpp`, `tools/*.py` | 카메라 작업용 시험 펌웨어/PC 도구 (UART 링크, 카트 보정, 추정기 검증). 사용법은 각 파일 머리말 | 요청 시 |
 | `src/tests/upright_balance_test.cpp` | **하드웨어에서 검증된 기준 코드** (글자 명령 전용) | **금지** (읽기만) |
 | `src/main.cpp`, `src/Pendulum.cpp`, `src/Speed.cpp`, `include/*` | 원래 펌웨어 | 요청 시에만 |
 | `lib/TMC/*`, `lib/Encoder/*` | TMC5160 STEP/DIR 드라이버, 엔코더 라이브러리 | **금지** |
