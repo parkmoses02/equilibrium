@@ -270,12 +270,15 @@ constexpr float CAM_MISMATCH_RAD = 8.0f * PI / 180.0f;       // camera vs encode
 constexpr int CAM_MISMATCH_TICKS = 10;                       // 20 ms
 constexpr float CAM_ARM_AGREE_RAD = 3.0f * PI / 180.0f;
 static int camMismatchTicks = 0;
-// The camera angle depends on where the cart is: perspective tilts the apparent rod angle by a few degrees per metre of
-// cart travel (cart_n1 log, pendulum hanging: camera - encoder = -5.8 deg per COUNTED metre of cart position, rise of
-// STEP count = +). Uncorrected, 0.5 deg of that at 0.1 m acts like extra position feedback of the WRONG sign and the
-// cart ran away to the rail limit (camctl_n2). The balance angle is corrected: angle = camera + slope * cartPosition.
-// 4.5 deg/m is between the upright estimate (~3) and the hanging measurement (5.8). Keys '.' / ',' change it by 0.5.
-float camXSlopeDegPerM = 4.5f;
+// The camera angle depends on where the cart is (perspective): the apparent rod angle is off by a few degrees per metre
+// of cart travel. Uncorrected, that bias acts like extra position feedback (Kangle 50 x c vs KcartPos 3) that cancels
+// most of the position stiffness; camctl_n2 (no correction) drifted 0.2 m in 15 s. The balance angle is corrected:
+//     angle = camera + camXSlopeDegPerM * cartPosition       (cartPosition: counted m, STEP count increasing = +)
+// SIGN: in camctl_n3 the cart ran away to +0.200 m within 2-3 s for every slope from +4.5 to +9.0 deg/m, i.e. a
+// POSITIVE slope makes it worse; the EKF - encoder bias is positive when the cart is at + (about +1.5..+3 deg/m), so the
+// correction must be NEGATIVE. (The hanging-pendulum log cart_n1 gave -5.8 deg/m with the opposite sign: do not trust it.)
+// Default -3.0 cancels the bias estimate; keys '.' / ',' change it by +-0.5 (stopped only).
+float camXSlopeDegPerM = -3.0f;
 bool cameraControl = false;                                  // balance source: false = encoder, true = camera
 static bool camEstimate(float& phi, float& w, uint32_t& ageMs);   // false until the estimator has data
 
@@ -938,6 +941,11 @@ static void shReport() {
             len = 0;                     // can never fit: drop it like before
         }
         if (len > 0) Serial.write(reinterpret_cast<const uint8_t*>(line), (size_t)len);
+    }
+    if (shStatsOn && armed && Serial.availableForWrite() >= 24) {
+        char xl[32];
+        const int xn = snprintf(xl, sizeof(xl), "# cart %+.3f m\n", (double)cartPosition);
+        if (xn > 0) Serial.write(reinterpret_cast<const uint8_t*>(xl), (size_t)xn);
     }
     pending = false;
     lastUs += 1000000;
