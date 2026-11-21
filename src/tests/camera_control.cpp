@@ -921,14 +921,18 @@ static void shReport() {
             auto rms = [](double s, uint32_t n) { return n ? sqrtf((float)(s / n)) : 0.0f; };
             auto mean = [](double s, uint32_t n) { return n ? (float)(s / n) : 0.0f; };
             len = snprintf(line, sizeof(line),
-                "# SH m%d all %.2f/%.2f b%+.2f w%.2f | up %.2f/%.2f b%+.2f w%.2f max%.1f n%lu | ctr %.2f b%+.2f n%lu | %lu/%luus v%lu r%lu\n",
+                "# SH m%d all %.2f/%.2f b%+.2f w%.2f | up %.2f/%.2f b%+.2f w%.2f max%.1f n%lu | ctr %.2f b%+.2f n%lu | %lu/%luus v%lu r%lu",
                 (int)pipelineMode, rms(shAll.e2, shAll.n) * d, rms(shAll.raw2, shAll.nRaw) * d, mean(shAll.esum, shAll.n) * d,
                 rms(shAll.w2, shAll.nW), rms(shUp.e2, shUp.n) * d, rms(shUp.raw2, shUp.nRaw) * d, mean(shUp.esum, shUp.n) * d,
                 rms(shUp.w2, shUp.nW), shUp.emax * d, (unsigned long)shUp.n, rms(shCtr.e2, shCtr.n) * d,
                 mean(shCtr.esum, shCtr.n) * d, (unsigned long)shCtr.n,
                 shTicks ? (unsigned long)(shTickSumUs / shTicks) : 0UL, (unsigned long)shTickMaxUs, (unsigned long)shPktValid, (unsigned long)shRejects);
             // snprintf reports the length it WOULD have written: never read past the buffer
-            if (len >= (int)sizeof(line)) len = (int)sizeof(line) - 1;
+            if (len > 126) len = 126;    // longer than the 128-byte FIFO could ever take: cut it (keeps room for the newline)
+            // cart position (counted m) at the end of the line if it still fits the 128-byte FIFO, then the newline
+            const int xn = snprintf(line + len, sizeof(line) - len, " x%+.2f", (double)cartPosition);
+            if (xn > 0 && len + xn <= 126) len += xn;
+            line[len++] = '\n';
         }
         // never block the control loop: print only if the whole line fits in the TX FIFO. The 50 Hz binary telemetry
         // can occupy the FIFO at the moment the line is due (the phase between the two drifts), so wait a few
@@ -941,11 +945,6 @@ static void shReport() {
             len = 0;                     // can never fit: drop it like before
         }
         if (len > 0) Serial.write(reinterpret_cast<const uint8_t*>(line), (size_t)len);
-    }
-    if (shStatsOn && armed && Serial.availableForWrite() >= 24) {
-        char xl[32];
-        const int xn = snprintf(xl, sizeof(xl), "# cart %+.3f m\n", (double)cartPosition);
-        if (xn > 0) Serial.write(reinterpret_cast<const uint8_t*>(xl), (size_t)xn);
     }
     pending = false;
     lastUs += 1000000;
