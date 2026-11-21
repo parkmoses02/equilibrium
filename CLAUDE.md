@@ -35,6 +35,7 @@
 |---|---|---|
 | `src/tests/pipeline_energy_lqr.cpp` | 현재 PC 패널과 연동되는 펌웨어 (스윙업 상태머신 + 리카티 LQR, 500Hz) | 요청 시 |
 | `src/tests/camera_pipeline.cpp` | `pipeline_energy_lqr.cpp` 복사본 + 섀도 카메라 추정기(제어는 아직 엔코더). 키 `E`로 상태 줄 토글. 레일 한계 기본값 0.20 센 m | 요청 시 |
+| `src/tests/camera_control.cpp` | `camera_pipeline.cpp` 복사본: 밸런스(`A`)를 카메라 EKF 각도/각속도로 돌릴 수 있다. 키 `C`(해제 상태에서만)로 엔코더/카메라 전환, **기본은 엔코더**. 카메라 모드 보호: 60 ms 데이터 끊김, 카메라-엔코더 8° 불일치 20 ms, `A`는 3° 이내 일치해야 허용, 스윙업 `S`는 거부. **하드웨어 시험 전(컴파일/문법만 확인)** | 요청 시 |
 | `src/tests/cart_accel_log.cpp`, `camera_delay_log.cpp`, `camera_estimator_test.cpp`, `tools/*.py` | 카메라 작업용 시험 펌웨어/PC 도구 (카트 보정과 px 배율, 지연 측정, 추정기 검증과 각도 보정 캡처). 사용법은 각 파일 머리말. 역할이 끝나 삭제한 것(git 이력에 있음): `uart_link_test`, `uart_motor_noise_test`, `cart_move_test`, `camera_estimator_cart_test`, `tools/camera_est_cart_check.py`, `tools/aig_uart_dummy.c` | 요청 시 |
 | `src/tests/upright_balance_test.cpp` | **하드웨어에서 검증된 기준 코드** (글자 명령 전용) | **금지** (읽기만) |
 | `src/main.cpp`, `src/Pendulum.cpp`, `src/Speed.cpp`, `include/*` | 원래 펌웨어 | 요청 시에만 |
