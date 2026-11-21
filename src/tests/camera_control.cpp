@@ -270,6 +270,12 @@ constexpr float CAM_MISMATCH_RAD = 8.0f * PI / 180.0f;       // camera vs encode
 constexpr int CAM_MISMATCH_TICKS = 10;                       // 20 ms
 constexpr float CAM_ARM_AGREE_RAD = 3.0f * PI / 180.0f;
 static int camMismatchTicks = 0;
+// The camera angle depends on where the cart is: perspective tilts the apparent rod angle by a few degrees per metre of
+// cart travel (cart_n1 log, pendulum hanging: camera - encoder = -5.8 deg per COUNTED metre of cart position, rise of
+// STEP count = +). Uncorrected, 0.5 deg of that at 0.1 m acts like extra position feedback of the WRONG sign and the
+// cart ran away to the rail limit (camctl_n2). The balance angle is corrected: angle = camera + slope * cartPosition.
+// 4.5 deg/m is between the upright estimate (~3) and the hanging measurement (5.8). Keys '.' / ',' change it by 0.5.
+float camXSlopeDegPerM = 4.5f;
 bool cameraControl = false;                                  // balance source: false = encoder, true = camera
 static bool camEstimate(float& phi, float& w, uint32_t& ageMs);   // false until the estimator has data
 
@@ -501,6 +507,7 @@ void updatePipelineController() {
 
     // Hard rail limit check
     if (fabsf(cartPosition) > gCartSoftLimit) {
+        Serial.printf("# cart position at the limit: %+.3f m (counted)\n", cartPosition);
         disarm("Cart exceeded soft limit");
         return;
     }
@@ -528,7 +535,7 @@ void updatePipelineController() {
             disarm("Camera data lost");
             return;
         }
-        if (fabsf(wrapPi(camPhi - encoderAngle)) > CAM_MISMATCH_RAD) {
+        if (fabsf(wrapPi(camPhi + camXSlopeDegPerM * (PI / 180.0f) * cartPosition - encoderAngle)) > CAM_MISMATCH_RAD) {
             if (++camMismatchTicks >= CAM_MISMATCH_TICKS) {
                 disarm("Camera and encoder disagree");
                 return;
@@ -536,7 +543,7 @@ void updatePipelineController() {
         } else {
             camMismatchTicks = 0;
         }
-        angle = camPhi;
+        angle = wrapPi(camPhi + camXSlopeDegPerM * (PI / 180.0f) * cartPosition);
         rate = camW;
     }
     const float tripAngle = (millis() < relaxedTripUntilMs) ? CATCH_TRIP_RAD : balanceTripRad;
@@ -1010,6 +1017,14 @@ void handleSerial() {
             } else {
                 cameraControl = !cameraControl;
                 Serial.printf("OK: balance source = %s\n", cameraControl ? "CAMERA" : "ENCODER");
+            }
+        } else if (b == '.' || b == ',') {
+            Serial.read();
+            if (armed) {
+                Serial.println("slope change REFUSED: stop first (X).");
+            } else {
+                camXSlopeDegPerM += (b == '.') ? 0.5f : -0.5f;
+                Serial.printf("OK: camera x slope = %.1f deg/m\n", (double)camXSlopeDegPerM);
             }
         } else if (b == 'B' || b == 'b') {
             // flip the sign of the shadow estimator's cart-acceleration gain B (does not touch the controller)

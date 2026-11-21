@@ -7,7 +7,8 @@ The firmware also streams binary telemetry frames for the GUI, which turn a norm
 This tool shows only the text messages ('# SH ...' shadow stats, 'OK: ...', 'ARMED', 'DISARMED', 'REFUSED', ...)
 and sends every key you type to the firmware:
     Z  zero the encoder (pendulum hanging still)     E  shadow camera stats on/off
-    B  flip the sign of the shadow estimator's cart-acceleration gain B (starts at -9.4; camera_pipeline only)
+    B  flip the sign of the shadow estimator's cart-acceleration gain B (starts at +9.4; camera_pipeline / camera_control)
+    C  balance source camera/encoder (camera_control only, while stopped)     . ,  camera x slope +/-0.5 deg/m (camera_control)
     S  swing-up      A  balance (hold the pendulum upright first)      X or space  stop
     q  stop and quit (Ctrl+C does the same)
 Do not run it together with the GUI or another monitor on the same port. Opening the port can reset the ESP32,
@@ -22,7 +23,7 @@ import termios
 import time
 import tty
 
-TEXT = re.compile(rb"(?:# SH[^\r\n]*|OK:[^\r\n]*|ARMED[^\r\n]*|DISARMED[^\r\n]*|CATCH[^\r\n]*|[A-Z ]*REFUSED[^\r\n]*|===[^\r\n]*)")
+TEXT = re.compile(rb"(?:# SH[^\r\n]*|# cart[^\r\n]*|OK:[^\r\n]*|ARMED[^\r\n]*|DISARMED[^\r\n]*|CATCH[^\r\n]*|[A-Z ]*REFUSED[^\r\n]*|===[^\r\n]*)")
 
 
 def extract_lines(chunk):
