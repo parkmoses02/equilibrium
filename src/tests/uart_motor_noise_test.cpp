@@ -194,6 +194,16 @@ static void configureDriver() {
 
 static bool driverOk = false;
 
+static bool detectDriver() {
+  const uint32_t ioin = readRegister(REG_IOIN);
+  Serial.printf("TMC5160 IOIN=0x%08lX (version byte 0x%02X, expected 0x30)\n",
+                (unsigned long)ioin, (unsigned)(ioin >> 24));
+  driverOk = (static_cast<uint8_t>(ioin >> 24) == 0x30);
+  if (driverOk) configureDriver();
+  digitalWrite(PIN_TMC_EN, HIGH);
+  return driverOk;
+}
+
 static void stopMotion(const char* reason) {
   running = false;
   cmdVelocity = 0.0f;
@@ -204,7 +214,10 @@ static void stopMotion(const char* reason) {
 }
 
 static void startMotion() {
-  if (!driverOk) { Serial.println("START REFUSED: TMC5160 not detected."); return; }
+  if (!driverOk && !detectDriver()) {
+    Serial.println("START REFUSED: TMC5160 not detected (check driver power and SPI wiring).");
+    return;
+  }
   if (running) return;
   motor.actualPosition(0);
   cartPosition = 0.0f;
@@ -268,10 +281,7 @@ void setup() {
 
   SPI.begin(PIN_SPI_SCK, PIN_SPI_MISO, PIN_SPI_MOSI, PIN_TMC_CS);
   delay(300);
-  const uint32_t ioin = readRegister(REG_IOIN);
-  driverOk = (static_cast<uint8_t>(ioin >> 24) == 0x30);
-  if (driverOk) configureDriver();
-  digitalWrite(PIN_TMC_EN, HIGH);
+  detectDriver();
 
   Serial2.setRxBufferSize(1024);
   Serial2.begin(UART_BAUD, SERIAL_8N1, PIN_UART_RX, PIN_UART_TX);
