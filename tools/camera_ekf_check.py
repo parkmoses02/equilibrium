@@ -12,10 +12,11 @@ import sys
 
 import numpy as np
 
+import camera_angle_calib as ca
 import camera_kalman_sim as ks
 
 COUNTS_PER_REV = 2400
-CAM_SIGN, CAM_OFFSET_RAD = -1.0, np.deg2rad(-0.96)
+CAM_SIGN = -1.0   # the zero offset and any angle-dependent correction are in the calibration table (src/tests/camera_angle_calib.h)
 PRE_DRIVER_MS = 6.3
 K, C, B, Q, R_DEG = 64.6, 0.05, -9.4, 200.0, 1.0   # must match camera_estimator_test.cpp
 
@@ -54,7 +55,7 @@ def main():
     # firmware semantics: a camera angle is consumed by the first tick at or after its reception
     valid = ((Cp[:, 2] & 0x01) != 0) & (Cp[:, 1] != -32768)
     tc, ang, flags, age = tc[valid], Cp[valid, 1] * 0.01, Cp[valid, 2], Cp[valid, 3]
-    z = ks.wrap(CAM_SIGN * np.deg2rad(ang) + CAM_OFFSET_RAD)
+    z = ca.apply_table(ca.load_header(), ks.wrap(CAM_SIGN * np.deg2rad(ang)))
     lag = np.where((flags & 0x20) != 0, np.rint((age * 0.1 + PRE_DRIVER_MS) / 2.0), 7).astype(int)
     tick_of = np.searchsorted(tx, tc, side="left")
     z_at = {}
@@ -77,6 +78,7 @@ def main():
     idx = np.clip(np.searchsorted(tc, tx, side="right") - 1, 0, len(tc) - 1)
     raw = z[idx]
     sk = 250
+    keep = np.zeros(len(tx), bool); keep[sk:-sk] = True
     def deg_rms(a, b): return np.rad2deg(np.sqrt(np.mean(ks.wrap(a - b)[sk:-sk] ** 2)))
     def deg_max(a, b): return np.rad2deg(np.abs(ks.wrap(a - b)[sk:-sk]).max())
     print(f"{len(tx)} ticks ({1 / dt_tick:.0f} Hz), {len(tc)} valid camera packets, lag ticks used: {sorted(set(lag.tolist()))}")
@@ -92,6 +94,14 @@ def main():
     print(f"firmware minus python: angle rms {np.sqrt(np.mean(d_phi ** 2)):.4f} deg (max {np.abs(d_phi).max():.3f}),"
           f" rate rms {np.sqrt(np.mean(d_w ** 2)):.4f} rad/s (max {np.abs(d_w).max():.3f})")
     print("(the firmware logs angles in 0.01 deg and rates in 0.001 rad/s, so ~0.005 deg / 0.0005 rad/s is rounding)")
+    print("signed mean error (estimator - encoder) and rms near upright:")
+    for name, lim in (("within 30 deg", 30.0), ("within  5 deg", 5.0)):
+        m = (np.abs(np.rad2deg(enc_phi)) < lim) & keep
+        if m.sum() > 20:
+            e = np.rad2deg(ks.wrap(fw_phi - enc_phi))[m]
+            print(f"  {name}: n={m.sum():5d}  mean {e.mean():+.2f} deg  rms {np.sqrt(np.mean(e ** 2)):.2f} deg")
+        else:
+            print(f"  {name}: too few samples ({int(m.sum())})")
     return 0
 
 

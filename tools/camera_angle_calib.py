@@ -149,6 +149,15 @@ def fit_table(z0, target):
     return c, wsum, ~good
 
 
+def load_header(path=None):
+    """The correction table (rad) that is compiled into the firmware (src/tests/camera_angle_calib.h)."""
+    import re
+    path = path or os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "src", "tests", "camera_angle_calib.h")
+    txt = open(path).read()
+    vals = re.search(r"CAM_CAL_RAD\[CAM_CAL_N\] = \{(.*?)\}", txt).group(1).replace("f", "").split(",")
+    return np.array([float(v) for v in vals])
+
+
 def apply_table(c, z0):
     x = (z0 + np.pi) / STEP
     i = np.floor(x).astype(int)
