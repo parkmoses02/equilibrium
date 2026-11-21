@@ -279,8 +279,9 @@ static int camMismatchTicks = 0;
 // correction must be NEGATIVE. (The hanging-pendulum log cart_n1 gave -5.8 deg/m with the opposite sign: do not trust it.)
 // camctl_n4 (x logged): EKF - encoder bias = 0.04 + 3.7 deg/m * x before the poke, -0.05 + 5.4 deg/m over the whole run.
 // -3.0 balanced for 30 s at x = +0.06 m but ran away to the limit after a poke (net slope +1..2 deg/m left, position
-// stiffness only ~1 of 3). Default -4.5 (about the middle of 3.7..5.4); keys '.' / ',' change it by +-0.5 (stopped only).
-float camXSlopeDegPerM = -4.5f;
+// stiffness only ~1 of 3). camctl_n5 (-4.5): still a net +1.5 deg/m; pooled n4+n5 fit through the origin 6.0 deg/m
+// (x 0.02: 5.2, x 0.06: 5.1, x 0.09: 6.5, x 0.14: 6.2). Default -6.0; keys '.' / ',' change it by +-0.5 (stopped only).
+float camXSlopeDegPerM = -6.0f;
 bool cameraControl = false;                                  // balance source: false = encoder, true = camera
 static bool camEstimate(float& phi, float& w, uint32_t& ageMs);   // false until the estimator has data
 
