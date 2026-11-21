@@ -203,7 +203,7 @@ static void updateMotion(float dt) {
     motor.setVelocityDirect(cmdVelocity * STEPS_PER_METRE);
 }
 
-// --- camera packet parser (same as uart_link_test.cpp) ---
+// --- camera packet parser (same as camera_estimator_test.cpp) ---
 static uint8_t crc8(const uint8_t* d, size_t n) {
     uint8_t c = 0;
     for (size_t i = 0; i < n; i++) {

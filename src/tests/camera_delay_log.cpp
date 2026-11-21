@@ -7,7 +7,7 @@
 // Log lines (only while logging; lines starting with '#' are status):
 //   E,<us>,<encoder count>                         every 2 ms (2400 counts/rev, hanging = 0)
 //   C,<rx_us>,<frame>,<angle i16 0.01deg>,<flags>,<age 0.1ms>   per valid camera packet
-// Camera packet (14 bytes) is the same as in uart_link_test.cpp.
+// Camera packet (14 bytes): layout in CLAUDE.md section 5 (same parser as camera_estimator_test.cpp).
 
 #include <Arduino.h>
 
@@ -54,7 +54,7 @@ void zeroEncoderDownward() {
     interrupts();
 }
 
-// --- Camera packet parser (same as uart_link_test.cpp) ---
+// --- Camera packet parser (same as camera_estimator_test.cpp) ---
 static uint8_t crc8(const uint8_t* d, size_t n) {
     uint8_t c = 0;
     for (size_t i = 0; i < n; i++) {

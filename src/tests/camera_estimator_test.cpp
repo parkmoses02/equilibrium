@@ -12,7 +12,7 @@
 // camera angle against the encoder at the current time, and the time one estimator tick takes.
 // Log lines while logging:   X,<us>,<encoder count>,<phi 0.01 deg>,<w mrad/s>      every tick
 //                            C,<rx_us>,<frame>,<angle i16 0.01deg>,<flags>,<age 0.1ms>   per camera packet
-// Camera packet (14 bytes) is the same as in uart_link_test.cpp.
+// Camera packet (14 bytes): layout in CLAUDE.md section 5. The other camera firmwares copy this parser.
 
 #include <Arduino.h>
 #include <math.h>
@@ -135,7 +135,7 @@ static void estimatorTick(float a, bool hasZ, float z, int lag) {
     }
 }
 
-// --- camera packet parser (same as uart_link_test.cpp) ---
+// --- camera packet parser (CRC-8 poly 0x07 over bytes 2..12; resyncs on 0xAA 0x55) ---
 static uint8_t crc8(const uint8_t* d, size_t n) {
     uint8_t c = 0;
     for (size_t i = 0; i < n; i++) {

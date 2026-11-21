@@ -602,7 +602,7 @@ void applyFrame(const uint8_t* f) {
 // SHADOW camera angle estimator (added to a copy of pipeline_energy_lqr.cpp)
 // ----------------------------------------------------------------------------
 // Reads the AI-G camera packets on Serial2 (460800, GPIO32 RX / GPIO33 TX) and runs the EKF with fixed-lag
-// delay compensation (same model/parameters as camera_estimator_cart_test.cpp). Its output is ONLY compared with
+// delay compensation (same model/parameters as camera_estimator_test.cpp). Its output is ONLY compared with
 // the encoder: nothing here feeds the controller, the motor or the telemetry frames.
 // Key 'E' toggles a '#' status line once per second (off by default so the GUI stream is untouched; it is
 // skipped when the serial TX buffer is too full, so it can never block the control loop).
