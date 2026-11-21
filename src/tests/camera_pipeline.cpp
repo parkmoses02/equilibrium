@@ -605,9 +605,12 @@ void applyFrame(const uint8_t* f) {
 // the encoder: nothing here feeds the controller, the motor or the telemetry frames.
 // Key 'E' toggles a '#' status line once per second (off by default so the GUI stream is untouched; it is
 // skipped when the serial TX buffer is too full, so it can never block the control loop).
-//   # SH m<mode> all <ekf>/<raw> deg w<rate> | up <ekf>/<raw> deg w<rate> max<ekf> n<ticks> | <avg>/<max>us v<valid pkts>
-//   all = the whole second, up = only the time the pendulum is within 30 deg of upright; ekf/raw = angle rms
-//   error of the estimator / the raw camera angle against the encoder, w = estimator rate rms error [rad/s].
+//   # SH m<mode> all <ekf>/<raw> b<bias> deg w<rate> | up <ekf>/<raw> b<bias> w<rate> max<ekf> n<ticks> |
+//        ctr <ekf> b<bias> n<ticks> | <avg>/<max>us v<valid pkts>
+//   all = the whole second, up = only the time the pendulum is within 30 deg of upright, ctr = within 5 deg
+//   (the range balancing really uses). ekf/raw = angle rms error of the estimator / the raw camera angle against
+//   the encoder [deg], b = MEAN signed error estimator - encoder [deg] (a constant bias, e.g. a wrong upright
+//   reference, shows up here but not in the rms of a noisy signal), w = estimator rate rms error [rad/s].
 // ============================================================================
 constexpr uint32_t SH_UART_BAUD = 460800;
 constexpr int SH_PIN_RX = 32;
@@ -745,8 +748,9 @@ static void shPollRx() {
 }
 
 // error statistics against the encoder at the current time
-struct ShStat { double e2 = 0, raw2 = 0, w2 = 0; float emax = 0; uint32_t n = 0, nRaw = 0, nW = 0; };
-static ShStat shAll, shUp;
+struct ShStat { double e2 = 0, esum = 0, raw2 = 0, w2 = 0; float emax = 0; uint32_t n = 0, nRaw = 0, nW = 0; };
+static ShStat shAll, shUp, shCtr;
+constexpr float SH_CENTER_RAD = 5.0f * 0.017453293f;
 static uint32_t shTickSumUs, shTickMaxUs, shTicks;
 static int32_t shCntHist[11];
 static float shWHist[11];
@@ -785,10 +789,12 @@ static void shTick() {
     const int old = (shCntIdx + 1) % 11;
     const float wTrue = (count - shCntHist[old]) * RAD_PER_COUNT / (10.0f * SH_DT);
     const float ew = shWHist[(shCntIdx + 11 - 5) % 11] - wTrue;
-    ShStat* buckets[2] = {&shAll, fabsf(phiEnc) < SH_UPRIGHT_RAD ? &shUp : nullptr};
+    ShStat* buckets[3] = {&shAll, fabsf(phiEnc) < SH_UPRIGHT_RAD ? &shUp : nullptr,
+                          fabsf(phiEnc) < SH_CENTER_RAD ? &shCtr : nullptr};
     for (ShStat* s : buckets) {
         if (!s) continue;
         s->e2 += (double)e * e;
+        s->esum += e;
         if (fabsf(e) > s->emax) s->emax = fabsf(e);
         s->n++;
         if (shZHoldValid) {
@@ -808,19 +814,24 @@ static void shReport() {
     lastUs += 1000000;
     if (shStatsOn) {
         const float d = 57.29578f;
-        char line[128];
+        char line[192];
         auto rms = [](double s, uint32_t n) { return n ? sqrtf((float)(s / n)) : 0.0f; };
-        const int len = snprintf(line, sizeof(line),
-            "# SH m%d all %.2f/%.2f deg w%.2f | up %.2f/%.2f deg w%.2f max%.1f n%lu | %lu/%luus v%lu\n",
-            (int)pipelineMode, rms(shAll.e2, shAll.n) * d, rms(shAll.raw2, shAll.nRaw) * d, rms(shAll.w2, shAll.nW),
-            rms(shUp.e2, shUp.n) * d, rms(shUp.raw2, shUp.nRaw) * d, rms(shUp.w2, shUp.nW), shUp.emax * d,
-            (unsigned long)shUp.n, shTicks ? (unsigned long)(shTickSumUs / shTicks) : 0UL,
-            (unsigned long)shTickMaxUs, (unsigned long)shPktValid);
+        auto mean = [](double s, uint32_t n) { return n ? (float)(s / n) : 0.0f; };
+        int len = snprintf(line, sizeof(line),
+            "# SH m%d all %.2f/%.2f b%+.2f deg w%.2f | up %.2f/%.2f b%+.2f w%.2f max%.1f n%lu | ctr %.2f b%+.2f n%lu | %lu/%luus v%lu\n",
+            (int)pipelineMode, rms(shAll.e2, shAll.n) * d, rms(shAll.raw2, shAll.nRaw) * d, mean(shAll.esum, shAll.n) * d,
+            rms(shAll.w2, shAll.nW), rms(shUp.e2, shUp.n) * d, rms(shUp.raw2, shUp.nRaw) * d, mean(shUp.esum, shUp.n) * d,
+            rms(shUp.w2, shUp.nW), shUp.emax * d, (unsigned long)shUp.n, rms(shCtr.e2, shCtr.n) * d,
+            mean(shCtr.esum, shCtr.n) * d, (unsigned long)shCtr.n,
+            shTicks ? (unsigned long)(shTickSumUs / shTicks) : 0UL, (unsigned long)shTickMaxUs, (unsigned long)shPktValid);
+        // snprintf reports the length it WOULD have written: never read past the buffer
+        if (len >= (int)sizeof(line)) len = (int)sizeof(line) - 1;
         // never block the control loop: print only if the whole line fits in the TX buffer
         if (len > 0 && Serial.availableForWrite() >= len) Serial.write(reinterpret_cast<const uint8_t*>(line), (size_t)len);
     }
     shAll = ShStat();
     shUp = ShStat();
+    shCtr = ShStat();
     shTickSumUs = shTickMaxUs = shTicks = 0;
     shPktOk = shPktValid = 0;
 }
