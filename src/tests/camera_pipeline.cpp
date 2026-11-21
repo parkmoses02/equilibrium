@@ -621,7 +621,10 @@ constexpr uint32_t SH_TICK_US = 2000;
 constexpr float SH_DT = 0.002f;
 constexpr float SH_K = 64.6f;                 // 1/s^2
 constexpr float SH_C = 0.05f;                 // 1/s
-constexpr float SH_B = -9.4f;                 // 1/m, cart acceleration in the firmware's counted units
+constexpr float SH_B_MAG = 9.4f;              // 1/m, cart acceleration in the firmware's counted units
+// Sign of B: -9.37 in the first measurement, +9.44 in the 2026-11-22 rerun (CLAUDE.md section 5). Key 'B' flips it
+// at run time so both signs can be compared in one balance run (shadow estimator only, no effect on control).
+static float SH_B = -SH_B_MAG;
 constexpr float SH_Q_RATE = 200.0f;
 constexpr float SH_R_ANGLE = 0.017453f * 0.017453f;   // (1 deg)^2
 constexpr float SH_CAM_SIGN = -1.0f;          // camera angle sign relative to the encoder
@@ -898,6 +901,11 @@ void handleSerial() {
             Serial.read();
             shStatsOn = !shStatsOn;
             Serial.println(shStatsOn ? "OK: shadow stats ON" : "OK: shadow stats OFF");
+        } else if (b == 'B' || b == 'b') {
+            // flip the sign of the shadow estimator's cart-acceleration gain B (does not touch the controller)
+            Serial.read();
+            SH_B = -SH_B;
+            Serial.printf("OK: shadow B = %+.1f\n", (double)SH_B);
         } else {
             Serial.read(); // unknown byte: discard so the stream can resynchronise
         }

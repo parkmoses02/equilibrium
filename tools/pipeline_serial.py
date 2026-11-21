@@ -7,6 +7,7 @@ The firmware also streams binary telemetry frames for the GUI, which turn a norm
 This tool shows only the text messages ('# SH ...' shadow stats, 'OK: ...', 'ARMED', 'DISARMED', 'REFUSED', ...)
 and sends every key you type to the firmware:
     Z  zero the encoder (pendulum hanging still)     E  shadow camera stats on/off
+    B  flip the sign of the shadow estimator's cart-acceleration gain B (starts at -9.4; camera_pipeline only)
     S  swing-up      A  balance (hold the pendulum upright first)      X or space  stop
     q  stop and quit (Ctrl+C does the same)
 Do not run it together with the GUI or another monitor on the same port. Opening the port can reset the ESP32,
@@ -64,7 +65,7 @@ def main():
     termios.tcsetattr(fd, termios.TCSANOW, attrs)
     old = termios.tcgetattr(sys.stdin)
     tty.setcbreak(sys.stdin.fileno())
-    print("keys: Z zero | E shadow stats | S swing-up | A balance | X/space stop | q quit\r")
+    print("keys: Z zero | E shadow stats | B flip shadow B | S swing-up | A balance | X/space stop | q quit\r")
     buf = b""
     last_rx = last_warn = time.time()
     try:
