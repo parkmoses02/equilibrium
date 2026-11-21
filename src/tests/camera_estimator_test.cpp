@@ -16,6 +16,7 @@
 
 #include <Arduino.h>
 #include <math.h>
+#include "camera_angle_calib.h"
 
 constexpr uint8_t PIN_ENCODER_A = 34;
 constexpr uint8_t PIN_ENCODER_B = 35;
@@ -35,7 +36,7 @@ constexpr float MODEL_B = -9.4f;            // 1/m, cart acceleration in the fir
 constexpr float Q_RATE = 200.0f;            // rate process noise density
 constexpr float R_ANGLE = 0.017453f * 0.017453f;   // (1 deg)^2 camera angle noise
 constexpr float CAM_SIGN = -1.0f;           // camera angle sign relative to the encoder
-constexpr float CAM_OFFSET_RAD = -0.96f * 0.017453f; // encoder = SIGN * camera + OFFSET
+// (the camera zero offset is part of the calibration table in camera_angle_calib.h)
 constexpr float PRE_DRIVER_MS = 6.3f;       // exposure/readout before the driver timestamp + UART
 constexpr int DEFAULT_LAG = 7;              // ticks (14 ms)
 constexpr int MAX_LAG = 14;
@@ -177,7 +178,7 @@ static void handlePacket(uint32_t rxUs) {
     if (!(flags & 0x01) || angle == (int16_t)0x8000) return;
     pktValid++;
     const float camRad = angle * 0.01f * 0.017453293f;
-    pendingZ = wrapPi(CAM_SIGN * camRad + CAM_OFFSET_RAD);
+    pendingZ = camCalibrate(wrapPi(CAM_SIGN * camRad));
     zHold = pendingZ;
     zHoldValid = true;
     pendingValid = true;

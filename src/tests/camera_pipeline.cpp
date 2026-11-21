@@ -2,6 +2,7 @@
 #include <SPI.h>
 #include <math.h>
 #include <MyData.h>
+#include "camera_angle_calib.h"
 
 /**
  * ============================================================================
@@ -624,7 +625,7 @@ constexpr float SH_B = -9.4f;                 // 1/m, cart acceleration in the f
 constexpr float SH_Q_RATE = 200.0f;
 constexpr float SH_R_ANGLE = 0.017453f * 0.017453f;   // (1 deg)^2
 constexpr float SH_CAM_SIGN = -1.0f;          // camera angle sign relative to the encoder
-constexpr float SH_CAM_OFFSET_RAD = -0.96f * 0.017453f;
+// (the camera zero offset is part of the calibration table in camera_angle_calib.h)
 constexpr float SH_PRE_DRIVER_MS = 6.3f;
 constexpr int SH_DEFAULT_LAG = 7;
 constexpr int SH_MAX_LAG = 14;
@@ -720,7 +721,7 @@ static void shHandlePacket() {
     if (!(flags & 0x01) || angle == (int16_t)0x8000) return;
     shPktValid++;
     const float camRad = angle * 0.01f * 0.017453293f;
-    shPendingZ = wrapPi(SH_CAM_SIGN * camRad + SH_CAM_OFFSET_RAD);
+    shPendingZ = camCalibrate(wrapPi(SH_CAM_SIGN * camRad));
     shZHold = shPendingZ;
     shZHoldValid = true;
     shPendingValid = true;
