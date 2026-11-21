@@ -277,8 +277,10 @@ static int camMismatchTicks = 0;
 // SIGN: in camctl_n3 the cart ran away to +0.200 m within 2-3 s for every slope from +4.5 to +9.0 deg/m, i.e. a
 // POSITIVE slope makes it worse; the EKF - encoder bias is positive when the cart is at + (about +1.5..+3 deg/m), so the
 // correction must be NEGATIVE. (The hanging-pendulum log cart_n1 gave -5.8 deg/m with the opposite sign: do not trust it.)
-// Default -3.0 cancels the bias estimate; keys '.' / ',' change it by +-0.5 (stopped only).
-float camXSlopeDegPerM = -3.0f;
+// camctl_n4 (x logged): EKF - encoder bias = 0.04 + 3.7 deg/m * x before the poke, -0.05 + 5.4 deg/m over the whole run.
+// -3.0 balanced for 30 s at x = +0.06 m but ran away to the limit after a poke (net slope +1..2 deg/m left, position
+// stiffness only ~1 of 3). Default -4.5 (about the middle of 3.7..5.4); keys '.' / ',' change it by +-0.5 (stopped only).
+float camXSlopeDegPerM = -4.5f;
 bool cameraControl = false;                                  // balance source: false = encoder, true = camera
 static bool camEstimate(float& phi, float& w, uint32_t& ageMs);   // false until the estimator has data
 
@@ -930,7 +932,7 @@ static void shReport() {
             // snprintf reports the length it WOULD have written: never read past the buffer
             if (len > 126) len = 126;    // longer than the 128-byte FIFO could ever take: cut it (keeps room for the newline)
             // cart position (counted m) at the end of the line if it still fits the 128-byte FIFO, then the newline
-            const int xn = snprintf(line + len, sizeof(line) - len, " x%+.2f", (double)cartPosition);
+            const int xn = snprintf(line + len, sizeof(line) - len, " x%+.3f", (double)cartPosition);
             if (xn > 0 && len + xn <= 126) len += xn;
             line[len++] = '\n';
         }
