@@ -21,7 +21,7 @@ import termios
 import time
 import tty
 
-TEXT = re.compile(rb"(?:# SH[^\r\n]*|OK:[^\r\n]*|ARMED[^\r\n]*|DISARMED[^\r\n]*|[A-Z ]*REFUSED[^\r\n]*|===[^\r\n]*)")
+TEXT = re.compile(rb"(?:# SH[^\r\n]*|OK:[^\r\n]*|ARMED[^\r\n]*|DISARMED[^\r\n]*|CATCH[^\r\n]*|[A-Z ]*REFUSED[^\r\n]*|===[^\r\n]*)")
 
 
 def extract_lines(chunk):
