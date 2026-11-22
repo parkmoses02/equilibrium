@@ -303,6 +303,7 @@ struct RecSample {
     uint16_t tMs;
     int16_t angleCdeg, rateCrad, encCdeg;   // 0.01 deg, 0.01 rad/s, 0.01 deg
     int16_t x01mm, v01mm, a_cms2, tv01mm;   // cart pos, commanded vel, commanded accel, swing target vel (0.1 mm, 0.1 mm/s, 0.01 m/s^2, 0.1 mm/s)
+    int16_t camX01px, camAngCdeg, camAgeMs; // latest camera packet: cart x (0.1 px, -1 = invalid), calibrated angle (0.01 deg, encoder convention), ms since it arrived
     uint8_t phase, mode;
 };
 constexpr int REC_MAX = 3000;               // 12 s at 250 Hz
@@ -312,6 +313,9 @@ static bool recActive = false, recDumpPending = false;
 static uint32_t recStartMs = 0;
 static uint8_t recTick = 0;
 static int recDumpIdx = -1;
+static int16_t recCamX01px = -1;        // set by shHandlePacket: cart x of the latest packet
+static float recCamAngRad = 0.0f;       // calibrated camera angle of the latest packet
+static uint32_t recCamUs = 0;           // when it arrived
 
 static int16_t recClamp(float v) { return (int16_t)constrain(lroundf(v), -32767L, 32767L); }
 static void recStart() { recN = 0; recTick = 0; recActive = true; recDumpPending = false; recStartMs = millis(); }
@@ -333,14 +337,17 @@ static void recSample(float angle, float rate, float encAngle) {
     r.v01mm = recClamp(commandedVelocity * 10000.0f);
     r.a_cms2 = recClamp(commandedAcceleration * 100.0f);
     r.tv01mm = recClamp(swingTargetVelocity * 10000.0f);
+    r.camX01px = recCamX01px;
+    r.camAngCdeg = recClamp(recCamAngRad * (18000.0f / PI));
+    r.camAgeMs = recClamp((micros() - recCamUs) / 1000.0f);
     r.phase = (uint8_t)swingPhase;
     r.mode = (uint8_t)pipelineMode;
 }
 static void recDump() {
     if (!recDumpPending || armed) return;
-    char line[72];
+    char line[112];
     if (recDumpIdx < 0) {
-        const int n = snprintf(line, sizeof(line), "# REC n%d t_ms ang_cdeg rate_crad enc_cdeg x v a tv ph mode\n", recN);
+        const int n = snprintf(line, sizeof(line), "# REC n%d t_ms ang_cdeg rate_crad enc_cdeg x v a tv camx camang camage ph mode\n", recN);
         if (Serial.availableForWrite() < n) return;
         Serial.write((const uint8_t *)line, n);
         recDumpIdx = 0;
@@ -357,8 +364,9 @@ static void recDump() {
             return;
         }
         const RecSample& r = recBuf[recDumpIdx];
-        const int n = snprintf(line, sizeof(line), "# REC %u %d %d %d %d %d %d %d %u %u\n", r.tMs, r.angleCdeg, r.rateCrad,
-                               r.encCdeg, r.x01mm, r.v01mm, r.a_cms2, r.tv01mm, r.phase, r.mode);
+        const int n = snprintf(line, sizeof(line), "# REC %u %d %d %d %d %d %d %d %d %d %d %u %u\n", r.tMs, r.angleCdeg, r.rateCrad,
+                               r.encCdeg, r.x01mm, r.v01mm, r.a_cms2, r.tv01mm, r.camX01px, r.camAngCdeg, r.camAgeMs,
+                               r.phase, r.mode);
         if (Serial.availableForWrite() < n) return;
         Serial.write((const uint8_t *)line, n);
         recDumpIdx++;
@@ -916,11 +924,17 @@ static void shHandlePacket() {
     const int16_t angle = (int16_t)(shBuf[4] | (shBuf[5] << 8));
     const uint8_t flags = shBuf[10];
     const uint16_t age = shBuf[11] | (shBuf[12] << 8);
+    {
+        const uint16_t cx = shBuf[6] | (shBuf[7] << 8);
+        recCamX01px = ((flags & 0x08) && cx != 0xFFFF) ? (int16_t)min<uint16_t>(cx, 32767) : (int16_t)-1;
+        recCamUs = micros();
+    }
     if (!(flags & 0x01) || angle == (int16_t)0x8000) return;
     shPktValid++;
     const float camRad = angle * 0.01f * 0.017453293f;
     shPendingZ = camCalibrate(wrapPi(SH_CAM_SIGN * camRad));
     shZHold = shPendingZ;
+    recCamAngRad = shPendingZ;
     shZHoldValid = true;
     shPendingValid = true;
     shPendingLag = (flags & 0x20) ? (int)lroundf((age * 0.1f + SH_PRE_DRIVER_MS) / (SH_DT * 1000.0f))
