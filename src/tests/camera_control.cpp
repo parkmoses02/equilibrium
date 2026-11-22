@@ -283,10 +283,12 @@ static int camMismatchTicks = 0;
 // correction must be NEGATIVE. (The hanging-pendulum log cart_n1 gave -5.8 deg/m with the opposite sign: do not trust it.)
 // camctl_n4 (x logged): EKF - encoder bias = 0.04 + 3.7 deg/m * x before the poke, -0.05 + 5.4 deg/m over the whole run.
 // -3.0 balanced for 30 s at x = +0.06 m but ran away to the limit after a poke (net slope +1..2 deg/m left, position
-// stiffness only ~1 of 3). camctl_n5 is NOT used: the motor mount was loose during that run (user), so its data is
-// not trustworthy. Default -4.5 (inside the n4 estimates 3.7..5.4); refit from a log taken with the motor fixed.
-// Keys '.' / ',' change it by +-0.5 (stopped only).
-float camXSlopeDegPerM = -4.5f;
+// stiffness only ~1 of 3). camctl_n5 is NOT used (loose motor mount). camctl_n10..n120 (motor fixed, 181 clean balance
+// seconds, x -0.02..+0.20): bias = -0.05 + 6.0 deg/m * x, residual rms 0.11 deg (quadratic term negligible). With -4.5 the net
+// +1.5 deg/m left the position loop weak and the cart drifted to the 0.20 limit 12-19 s after the catch in 3 of 7 failed
+// swing-ups. Default -6.0. Keys '.' / ',' change it by +-0.5 (stopped only). Only x >= -0.02 was sampled; the negative
+// side is assumed symmetric.
+float camXSlopeDegPerM = -6.0f;
 bool cameraControl = false;                                  // balance source: false = encoder, true = camera
 static bool camEstimate(float& phi, float& w, uint32_t& ageMs);   // false until the estimator has data
 
