@@ -82,7 +82,7 @@ constexpr uint32_t TELEMETRY_PERIOD_MS = 20; // 50 Hz telemetry
 
 // --- Energy Swing-up Constants (reused from upright_balance_test.cpp) ---
 float gSwingSpeed = 1.20f;      // m/s
-float gSwingAccel = 16.0f;     // m/s^2
+float gSwingAccel = 8.0f;      // m/s^2 (16 in pipeline_energy_lqr; test: does the cart deliver the commanded acceleration? camctl_n103..105)
 constexpr float SWING_START_OFFSET_M = 0.10f;
 constexpr float SWING_DIRECTION = -1.0f;
 constexpr uint32_t SWING_SETTLE_TIMEOUT_MS = 3000;
