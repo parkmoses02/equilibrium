@@ -296,7 +296,77 @@ float pendulumEnergy(float angle, float rate) {
     return 0.5f * rate * rate * gPendulumLengthM / GRAVITY + cos(angle) - 1.0f;
 }
 
+// --- swing-up flight recorder: samples at 250 Hz from the first pump until 2 s after the catch (or until disarm), then
+// prints "# REC ..." lines once the controller is stopped (never while armed, so the 500 Hz loop is not disturbed).
+// Key R prints the last recording again (stopped only). The angle/rate are the ones the controller used.
+struct RecSample {
+    uint16_t tMs;
+    int16_t angleCdeg, rateCrad, encCdeg;   // 0.01 deg, 0.01 rad/s, 0.01 deg
+    int16_t x01mm, v01mm, a_cms2, tv01mm;   // cart pos, commanded vel, commanded accel, swing target vel (0.1 mm, 0.1 mm/s, 0.01 m/s^2, 0.1 mm/s)
+    uint8_t phase, mode;
+};
+constexpr int REC_MAX = 3000;               // 12 s at 250 Hz
+static RecSample recBuf[REC_MAX];
+static int recN = 0;
+static bool recActive = false, recDumpPending = false;
+static uint32_t recStartMs = 0;
+static uint8_t recTick = 0;
+static int recDumpIdx = -1;
+
+static int16_t recClamp(float v) { return (int16_t)constrain(lroundf(v), -32767L, 32767L); }
+static void recStart() { recN = 0; recTick = 0; recActive = true; recDumpPending = false; recStartMs = millis(); }
+static void recFinish() {
+    if (!recActive) return;
+    recActive = false;
+    recDumpPending = (recN > 0);
+}
+static void recSample(float angle, float rate, float encAngle) {
+    if (!recActive) return;
+    if (pipelineMode == PIPELINE_BALANCE && millis() - catchMs > 2000) { recFinish(); return; }
+    if ((recTick++ & 1) || recN >= REC_MAX) return;
+    RecSample& r = recBuf[recN++];
+    r.tMs = (uint16_t)(millis() - recStartMs);
+    r.angleCdeg = recClamp(angle * (18000.0f / PI));
+    r.rateCrad = recClamp(rate * 100.0f);
+    r.encCdeg = recClamp(encAngle * (18000.0f / PI));
+    r.x01mm = recClamp(cartPosition * 10000.0f);
+    r.v01mm = recClamp(commandedVelocity * 10000.0f);
+    r.a_cms2 = recClamp(commandedAcceleration * 100.0f);
+    r.tv01mm = recClamp(swingTargetVelocity * 10000.0f);
+    r.phase = (uint8_t)swingPhase;
+    r.mode = (uint8_t)pipelineMode;
+}
+static void recDump() {
+    if (!recDumpPending || armed) return;
+    char line[72];
+    if (recDumpIdx < 0) {
+        const int n = snprintf(line, sizeof(line), "# REC n%d t_ms ang_cdeg rate_crad enc_cdeg x v a tv ph mode\n", recN);
+        if (Serial.availableForWrite() < n) return;
+        Serial.write((const uint8_t *)line, n);
+        recDumpIdx = 0;
+        return;
+    }
+    // a few lines per loop pass, only when the TX FIFO has room
+    for (int k = 0; k < 4; k++) {
+        if (recDumpIdx >= recN) {
+            const int n = snprintf(line, sizeof(line), "# REC end\n");
+            if (Serial.availableForWrite() < n) return;
+            Serial.write((const uint8_t *)line, n);
+            recDumpPending = false;
+            recDumpIdx = -1;
+            return;
+        }
+        const RecSample& r = recBuf[recDumpIdx];
+        const int n = snprintf(line, sizeof(line), "# REC %u %d %d %d %d %d %d %d %u %u\n", r.tMs, r.angleCdeg, r.rateCrad,
+                               r.encCdeg, r.x01mm, r.v01mm, r.a_cms2, r.tv01mm, r.phase, r.mode);
+        if (Serial.availableForWrite() < n) return;
+        Serial.write((const uint8_t *)line, n);
+        recDumpIdx++;
+    }
+}
+
 void disarm(const char *reason) {
+    recFinish();
     setPipelineMode(PIPELINE_SAFE);
     commandedVelocity = 0.0f;
     commandedAcceleration = 0.0f;
@@ -431,6 +501,7 @@ float updateSwingUp(float angle, float rate, float dt) {
         swingStartMs = millis();
         previousSwingRate = rate;
         Serial.printf("KICK: from X=%+.3f m\n", cartPosition);
+        recStart();
     }
 
     if (!upperHalf) apexHandled = false;
@@ -559,6 +630,7 @@ void updatePipelineController() {
         angle = camAngle;
         rate = camW;
     }
+    recSample(angle, rate, encoderAngle);
 
     // Mode: Swing-up
     if (pipelineMode == PIPELINE_SWING) {
@@ -1038,6 +1110,16 @@ void handleSerial() {
             Serial.read();
             softBalance = !softBalance;
             printGains();
+        } else if (b == 'R' || b == 'r') {
+            Serial.read();
+            if (armed) {
+                Serial.println("R REFUSED: stop first (X).");
+            } else if (recN > 0) {
+                recDumpPending = true;
+                recDumpIdx = -1;
+            } else {
+                Serial.println("# REC none");
+            }
         } else if (b == 'E' || b == 'e') {
             // shadow camera estimator status line on/off (does not touch the controller)
             Serial.read();
@@ -1111,4 +1193,5 @@ void loop() {
     serviceStepper();
     transmitTelemetry();
     shReport();
+    recDump();
 }
