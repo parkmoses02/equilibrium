@@ -8,13 +8,16 @@
 // CAMERA CONTROL (step 5 of the camera pipeline): copy of camera_pipeline.cpp where the BALANCE loop can use the camera
 // estimate (angle and rate of the fixed-lag EKF below) instead of the encoder. The encoder stays connected as a
 // watchdog. Key 'C' (only while disarmed) toggles the source; the default is ENCODER, so the firmware behaves like
-// camera_pipeline until you ask for the camera. Camera control is for 'A' (balance armed by hand) only: swing-up
-// stays on the encoder ('S' is refused in camera mode, the markers blur in a fast swing).
+// camera_pipeline until you ask for the camera. In camera mode BOTH 'A' (balance) and 'S' (energy swing-up, catch and
+// balance) run on the camera estimate: the swing-up state machine only needs the angle (catch window, apex and bottom
+// detection) and the rate (sign, and its magnitude for the energy and the bottom-crossing time). The encoder is read
+// only for the guards below.
 // Guards in camera mode (all of them disarm and stop the cart):
-//   - no valid camera packet for CAM_TIMEOUT_MS,
-//   - |camera estimate - encoder| > CAM_MISMATCH_RAD for CAM_MISMATCH_TICKS control ticks in a row,
-//   - the usual rail limit and trip angle (now on the camera angle).
-// 'A' is refused unless the camera data is fresh and within CAM_ARM_AGREE_RAD of the encoder.
+//   - no accepted camera packet for CAM_TIMEOUT_MS,
+//   - |camera estimate - encoder| > CAM_MISMATCH_RAD (balance) / CAM_SWING_MISMATCH_RAD (swing-up) for
+//     CAM_MISMATCH_TICKS control ticks in a row,
+//   - the usual rail limit, swing-up timeout and trip angle (now on the camera angle).
+// 'A' and 'S' are refused unless the camera data is fresh and within CAM_ARM_AGREE_RAD of the encoder.
 // ============================================================================
 
 /**
@@ -267,6 +270,7 @@ void setPipelineMode(PipelineMode next) {
 // --- camera control source (the estimator itself lives in the shadow block below) ---
 constexpr uint32_t CAM_TIMEOUT_MS = 60;                      // ~5 camera frames at 90 fps
 constexpr float CAM_MISMATCH_RAD = 8.0f * PI / 180.0f;       // camera vs encoder, balancing errors are < 1.5 deg
+constexpr float CAM_SWING_MISMATCH_RAD = 12.0f * PI / 180.0f; // swing-up: faster motion, EKF error was 2-3 deg rms (camctl_n9)
 constexpr int CAM_MISMATCH_TICKS = 10;                       // 20 ms
 constexpr float CAM_ARM_AGREE_RAD = 3.0f * PI / 180.0f;
 static int camMismatchTicks = 0;
@@ -342,10 +346,6 @@ void armBalanceController() {
 }
 
 void startSwingUp() {
-    if (cameraControl) {
-        Serial.println("SWING REFUSED: camera control is for balance only (press C for the encoder).");
-        return;
-    }
     if (!calibrated) {
         Serial.println("SWING REFUSED: zero downward with Z first.");
         return;
@@ -360,6 +360,21 @@ void startSwingUp() {
                       psi * 180.0f / PI, angularRate);
         return;
     }
+    if (cameraControl) {
+        float camPhi = 0.0f, camW = 0.0f;
+        uint32_t ageMs = 0;
+        if (!camEstimate(camPhi, camW, ageMs) || ageMs > CAM_TIMEOUT_MS) {
+            Serial.println("SWING REFUSED: no fresh camera data (is pend_cam running? markers visible?).");
+            return;
+        }
+        const float encAngle = uprightAngleFromCount(readEncoderCount());
+        if (fabsf(wrapPi(camPhi - encAngle)) > CAM_ARM_AGREE_RAD) {
+            Serial.printf("SWING REFUSED: camera %.2f deg and encoder %.2f deg disagree.\n",
+                          camPhi * 180.0f / PI, encAngle * 180.0f / PI);
+            return;
+        }
+    }
+    camMismatchTicks = 0;
     balanceTripRad = TRIP_ANGLE_RAD;   // the swing-up -> catch path keeps the normal trip angle
     motor.actualPosition(0);
     cartPosition = 0.0f;
@@ -519,21 +534,8 @@ void updatePipelineController() {
         return;
     }
 
-    // Mode: Swing-up
-    if (pipelineMode == PIPELINE_SWING) {
-        if (millis() - swingStartMs > SWING_TIMEOUT_MS) {
-            disarm("Swing-up timed out");
-            return;
-        }
-        commandedAcceleration = updateSwingUp(angle, angularRate, dt);
-        if (pipelineMode == PIPELINE_SWING) {
-            commandedVelocity += commandedAcceleration * dt;
-            commandedVelocity = constrain(commandedVelocity, -gSwingSpeed, gSwingSpeed);
-            return;
-        }
-    }
-
-    // Mode: Riccati LQR Balance
+    // Camera source (swing-up and balance): the camera estimate replaces the encoder angle and rate; the encoder
+    // only guards it.
     float rate = angularRate;
     if (cameraControl) {
         float camPhi = 0.0f, camW = 0.0f;
@@ -542,7 +544,9 @@ void updatePipelineController() {
             disarm("Camera data lost");
             return;
         }
-        if (fabsf(wrapPi(camPhi + camXSlopeDegPerM * (PI / 180.0f) * cartPosition - encoderAngle)) > CAM_MISMATCH_RAD) {
+        const float camAngle = wrapPi(camPhi + camXSlopeDegPerM * (PI / 180.0f) * cartPosition);
+        const float mismatchLimit = (pipelineMode == PIPELINE_SWING) ? CAM_SWING_MISMATCH_RAD : CAM_MISMATCH_RAD;
+        if (fabsf(wrapPi(camAngle - encoderAngle)) > mismatchLimit) {
             if (++camMismatchTicks >= CAM_MISMATCH_TICKS) {
                 disarm("Camera and encoder disagree");
                 return;
@@ -550,9 +554,25 @@ void updatePipelineController() {
         } else {
             camMismatchTicks = 0;
         }
-        angle = wrapPi(camPhi + camXSlopeDegPerM * (PI / 180.0f) * cartPosition);
+        angle = camAngle;
         rate = camW;
     }
+
+    // Mode: Swing-up
+    if (pipelineMode == PIPELINE_SWING) {
+        if (millis() - swingStartMs > SWING_TIMEOUT_MS) {
+            disarm("Swing-up timed out");
+            return;
+        }
+        commandedAcceleration = updateSwingUp(angle, rate, dt);
+        if (pipelineMode == PIPELINE_SWING) {
+            commandedVelocity += commandedAcceleration * dt;
+            commandedVelocity = constrain(commandedVelocity, -gSwingSpeed, gSwingSpeed);
+            return;
+        }
+    }
+
+    // Mode: Riccati LQR Balance
     const float tripAngle = (millis() < relaxedTripUntilMs) ? CATCH_TRIP_RAD : balanceTripRad;
     if (fabsf(angle) > tripAngle) {
         disarm("Pendulum exceeded trip angle");
