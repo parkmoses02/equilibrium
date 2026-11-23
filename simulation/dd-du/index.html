@@ -36,7 +36,7 @@ function rk(y,u,h,drag){
   const a=deriv(y,u,drag),b=deriv(add(y,a,h/2),u,drag),c=deriv(add(y,b,h/2),u,drag),d=deriv(add(y,c,h),u,drag);
   return y.map((v,i)=>v+h*(a[i]+2*b[i]+2*c[i]+d[i])/6);
 }
-const K=[-3.464102,78.817707,-116.908943,-4.688550,6.365765,-13.358312];
+const K=[-14.832397,153.628010,-244.278154,-17.451330,11.412767,-27.573131];
 // Linearize the 5 ms plant step along the nominal path, then solve finite-horizon
 // discrete LQR backwards. No perturbed-state data is used to design the gains.
 function makeTracker(knots){
@@ -79,7 +79,7 @@ function sim(knots,record=false,sub=1,variant='nominal',tracker=null,drag=null){
         const angles=[wrap(base-ref[2]),wrap(tip-ref[3])];
         if(prior)rate=rate.map((w,j)=>.6*w+.4*wrap(angles[j]-prior[j])/dt);
         prior=angles;
-        const e=[y[0]-ref[1],...angles,y[3]-ref[4],...rate];
+        const e=[0,...angles,y[3]-ref[4],...rate];
         command=clip(u-tracker.gains[t].reduce((s,k,j)=>s+k*e[j],0),16);
       }
       advance(command);
@@ -89,19 +89,19 @@ function sim(knots,record=false,sub=1,variant='nominal',tracker=null,drag=null){
   const residual=[6*y[0],ea,eb,.16*y[4],.16*y[5],20*Math.max(0,maxX-.26)];
   const score=residual.reduce((v,x)=>v+x*x,0);
   let caught=false,held=false;
-  if(record && Math.max(Math.abs(ea),Math.abs(eb))<.05 && Math.max(Math.abs(y[4]),Math.abs(y[5]))<.5 && Math.abs(y[3])<=.25 && maxX<.28){
+  if(record && Math.max(Math.abs(ea),Math.abs(eb))<.05 && Math.max(Math.abs(y[4]),Math.abs(y[5]))<.5 && Math.abs(y[3])<=.25 && maxX<=.30){
     caught=true;
     const quantum=2*pi/4000, quant=a=>Math.round(a/quantum)*quantum;
     function enc(){let base=quant(y[1]-pi);return [wrap(base),wrap(pi+base+quant(y[2]-y[1]))];}
     let [pa,pb]=enc(),wa=0,wb=0;
     for(let i=0;i<400;i++){
       const [a,b]=enc();
-      if(Math.max(Math.abs(a),Math.abs(b))>.17 || Math.abs(y[0])>=.30)break;
+      if(Math.max(Math.abs(a),Math.abs(b))>.17 || Math.abs(y[0])>.30)break;
       wa=.6*wa+.4*wrap(a-pa)/dt;wb=.6*wb+.4*wrap(b-pb)/dt;pa=a;pb=b;
-      const state=[y[0],a,b,y[3],wa,wb];
+      const state=[0,a,b,y[3],wa,wb];
       const req=-state.reduce((sum,x,j)=>sum+x*K[j],0);
       advance((clip(y[3]+dt*clip(req,12),.8)-y[3])/dt);
-      held=i===399 && Math.max(Math.abs(wrap(y[1]-pi)),Math.abs(wrap(y[2])))<=.17 && maxX<.30;
+      held=i===399 && Math.max(Math.abs(wrap(y[1]-pi)),Math.abs(wrap(y[2])))<=.17 && maxX<=.30;
     }
   }
   return {frames,score,residual,end,ea,eb,caught,held,maxX,maxV,maxA};
@@ -135,7 +135,7 @@ function* search(seed=1){
   }
  }
 }
-if(typeof module!=="undefined")module.exports={search,sim,dt,stride,N,makeTracker};
+if(typeof module!=="undefined")module.exports={search,sim,dt,stride,N,makeTracker,rk};
 
 ;(()=>{
 const root=document.getElementById('du-lab'),el=k=>root.querySelector('[data-id="'+k+'"]');

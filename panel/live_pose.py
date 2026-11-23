@@ -1,6 +1,8 @@
 """Read the PlatformIO monitor log (never opens the board or sends commands)."""
 import argparse
 import math
+import subprocess
+import sys
 import time
 import tkinter as tk
 from pathlib import Path
@@ -16,6 +18,14 @@ def main():
         parser.error("Start PlatformIO Monitor with log2file first, or specify the active log path.")
     root = tk.Tk()
     root.title("Equilibrium | Live pose")
+    toolbar = tk.Frame(root)
+    toolbar.pack(anchor="e")
+    tk.Button(toolbar, text="실험 재생", command=lambda: subprocess.Popen(
+        [sys.executable, str(Path(__file__).with_name("replay.py")), str(path)]
+    )).pack(side="left")
+    tk.Button(toolbar, text="DU 이중진자 LQR", command=lambda: subprocess.Popen(
+        [sys.executable, str(Path(__file__).with_name("du_lqr.py"))]
+    )).pack(side="left")
     c = tk.Canvas(root, width=800, height=620, bg="#f7faf9")
     c.pack()
     status = tk.StringVar(value="Waiting for control telemetry: " + path.name)

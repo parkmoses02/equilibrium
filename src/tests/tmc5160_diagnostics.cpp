@@ -357,7 +357,7 @@ bool step3_statusFlags() {
 // ============================================================
 // 드라이버 기본 설정 (진단용 저전류)
 // ============================================================
-void configureDriver() {
+void configureDriver(bool resetPosition = true) {
     // en_pwm_mode 를 켜면 stealthChop. 기본은 spreadCycle(0) - 토크가 확실하다.
     writeRegister(REG_GCONF, g_useStealthChop ? 0x00000004UL : 0x00000000UL);
     // stealthChop 을 쓸 때도 고속 구간에서는 spreadCycle 로 넘어가도록 임계값을
@@ -378,14 +378,18 @@ void configureDriver() {
     writeRegister(REG_A1, 1000);
     writeRegister(REG_V1, 0);        // V1=0 -> A1/D1 구간 없이 AMAX/DMAX 만 사용
     writeRegister(REG_AMAX, 1000);
-    writeRegister(REG_VMAX, VEL_TEST);
+    writeRegister(REG_VMAX, resetPosition ? VEL_TEST : 0);
     writeRegister(REG_DMAX, 1000);
     writeRegister(REG_D1, 1000);
     writeRegister(REG_VSTOP, 10);
 
-    writeRegister(REG_RAMPMODE, 0);
-    writeRegister(REG_XACTUAL, 0);
-    writeRegister(REG_XTARGET, 0);
+    if (resetPosition) {
+        writeRegister(REG_RAMPMODE, 0);
+        writeRegister(REG_XACTUAL, 0);
+        writeRegister(REG_XTARGET, 0);
+    } else {
+        writeRegister(REG_RAMPMODE, 1); // velocity mode, VMAX=0
+    }
 }
 
 // ============================================================

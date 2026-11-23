@@ -9,9 +9,13 @@ import numpy as np
 try:
     from .serial_protocol import SerialProtocol
     from . import simulator
+    from .du_lqr import DuLqrPanel
+    from .replay import ReplayPanel
 except ImportError:
     from serial_protocol import SerialProtocol
     import simulator
+    from du_lqr import DuLqrPanel
+    from replay import ReplayPanel
 
 
 class PendulumWidget(QtWidgets.QWidget):
@@ -204,7 +208,11 @@ class MainWindow(QtWidgets.QMainWindow):
         """)
 
         widget = QtWidgets.QWidget()
-        self.setCentralWidget(widget)
+        tabs = QtWidgets.QTabWidget()
+        tabs.addTab(widget, "Pendulum Dashboard")
+        tabs.addTab(DuLqrPanel(), "DU 이중진자 LQR")
+        tabs.addTab(ReplayPanel(), "실험 재생")
+        self.setCentralWidget(tabs)
         main_layout = QtWidgets.QHBoxLayout(widget)
         main_layout.setSpacing(15)
         main_layout.setContentsMargins(15, 15, 15, 15)
