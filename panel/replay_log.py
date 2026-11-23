@@ -6,7 +6,9 @@ from typing import NamedTuple
 
 
 TARGET = {"q": (0, 0), "w": (0, math.pi), "e": (math.pi, 0), "r": (math.pi, math.pi)}
-PHASE = {"q": "UU", "w": "UD", "e": "DU", "r": "DD", "s": "DD → DU", "u": "DD → UU"}
+PHASE = {"q": "UU", "w": "UD", "e": "DU", "r": "DD", "s": "DD → DU", "u": "DD → UU", "d": "DD → UD"}
+SWING_PHASE = {"DU": "s", "UU": "u", "UD": "d"}
+CSV_PHASE = {"RE_CSV_BEGIN": "s", "RQ_CSV_BEGIN": "u", "RW_CSV_BEGIN": "d"}
 
 
 class Sample(NamedTuple):
@@ -33,7 +35,7 @@ def clock_offset(poses, swing):
     # At a shared tick the ramp position is the same, rounded to 5 and 6 places.
     offsets = Counter()
     for p in poses:
-        if p.mode in ("s", "u"):
+        if p.mode in SWING_PHASE.values():
             offsets.update(
                 p.us - s.us for s in swing
                 if abs(p.x - s.x) <= 0.000006
@@ -81,12 +83,13 @@ def load_recordings(path):
                 continue
             if line.startswith(("ACTIVE ", "rst:")):
                 finish()
-                swing_phase = "u" if line.startswith("ACTIVE DD->UU") else "s"
+                if line.startswith("ACTIVE DD->"):
+                    swing_phase = SWING_PHASE.get(line.split("->", 1)[1].split(" ", 1)[0], "s")
                 if line.startswith("rst:"):
                     selected = "q"
             elif line.startswith("Selected ") and line[9:10] in TARGET:
                 selected = line[9]
-            elif line in ("CATCH DU -> e", "CATCH UU -> q"):
+            elif line in ("CATCH DU -> e", "CATCH UU -> q", "CATCH UD -> w"):
                 caught, selected = True, line[-1]
             elif line == "OFF" or line.startswith("OFF:"):
                 if not reason:
@@ -105,14 +108,14 @@ def load_recordings(path):
                             selected = mode
                 except ValueError:
                     continue
-            elif line in ("RQ_CSV_BEGIN", "RE_CSV_BEGIN"):
-                swing_phase = "u" if line.startswith("RQ_") else "s"
+            elif line in CSV_PHASE:
+                swing_phase = CSV_PHASE[line]
             elif line.startswith(("step,t_us,", "elapsed_us,dt_us,")):
                 if line.startswith("step,t_us,") and swing:
                     finish()  # Concatenated CSV exports may omit ACTIVE markers.
                 columns = {name: i for i, name in enumerate(line.split(","))}
                 section = "swing" if "t_us" in columns else "trace"
-            elif line in ("RE_CSV_END", "RQ_CSV_END"):
+            elif line in ("RE_CSV_END", "RQ_CSV_END", "RW_CSV_END"):
                 section = ""
             elif section and line[0].isdigit():
                 parts = line.split(",")
