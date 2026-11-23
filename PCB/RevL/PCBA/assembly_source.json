@@ -1,0 +1,522 @@
+{
+  "bom": [
+    [
+      "Comment",
+      "Designator",
+      "Footprint",
+      "LCSC Part #"
+    ],
+    [
+      "Female socket 1x20 2.54mm vertical",
+      "ESP_L,ESP_R",
+      "PinSocket_1x20_P2.54mm_Vertical",
+      "C7509519"
+    ],
+    [
+      "Female socket 1x11 2.54mm vertical",
+      "BOB_SIG,BOB_PWR",
+      "PinSocket_1x11_P2.54mm_Vertical",
+      ""
+    ],
+    [
+      "WJ500V-5.08-2P screw terminal",
+      "J1",
+      "TerminalBlock_1x02_P5.08mm",
+      "C8465"
+    ],
+    [
+      "Female socket 1x8 2.54mm vertical",
+      "J2",
+      "PinSocket_1x08_P2.54mm_Vertical",
+      "C27438"
+    ],
+    [
+      "Female socket 1x5 2.54mm vertical",
+      "J3",
+      "PinSocket_1x05_P2.54mm_Vertical",
+      "C7509517"
+    ],
+    [
+      "B4B-PH-K-S(LF)(SN) JST PH 4pin 2mm",
+      "J4",
+      "JST_PH_B4B-PH-K_1x04_P2.00mm_Vertical",
+      "C131334"
+    ],
+    [
+      "Male pin header 1x6 2.54mm vertical",
+      "J5",
+      "PinHeader_1x06_P2.54mm_Vertical",
+      ""
+    ],
+    [
+      "Male pin header 1x5 2.54mm vertical",
+      "J6",
+      "PinHeader_1x05_P2.54mm_Vertical",
+      ""
+    ],
+    [
+      "Male pin header 1x2 2.54mm vertical",
+      "J7",
+      "PinHeader_1x02_P2.54mm_Vertical",
+      ""
+    ],
+    [
+      "SN74LVC14ADR",
+      "U3,U4",
+      "SOIC-14_3.9x8.7mm_P1.27mm",
+      "C133541"
+    ],
+    [
+      "100nF 16V X7R 10%",
+      "C1,C2",
+      "C_0805_2012Metric",
+      ""
+    ],
+    [
+      "10uF 10V X7R 20%",
+      "C3",
+      "C_0805_2012Metric",
+      ""
+    ],
+    [
+      "10k 1% 0.125W",
+      "R5",
+      "R_0805_2012Metric",
+      ""
+    ],
+    [
+      "100k 1% 0.125W",
+      "R6,R7",
+      "R_0805_2012Metric",
+      ""
+    ],
+    [
+      "100R 1% 0.125W",
+      "R8,R9",
+      "R_0805_2012Metric",
+      ""
+    ]
+  ],
+  "cpl": [
+    [
+      "Designator",
+      "Mid X",
+      "Mid Y",
+      "Layer",
+      "Rotation"
+    ],
+    [
+      "ESP_L",
+      27.84,
+      -39.13,
+      "top",
+      90.0
+    ],
+    [
+      "ESP_R",
+      53.24,
+      -39.13,
+      "top",
+      90.0
+    ],
+    [
+      "BOB_SIG",
+      78.0,
+      -20.0,
+      "top",
+      0.0
+    ],
+    [
+      "BOB_PWR",
+      78.0,
+      -55.56,
+      "top",
+      0.0
+    ],
+    [
+      "J1",
+      77.0,
+      -8.0,
+      "top",
+      0.0
+    ],
+    [
+      "J2",
+      10.0,
+      -39.13,
+      "top",
+      90.0
+    ],
+    [
+      "J3",
+      10.0,
+      -64.08,
+      "top",
+      90.0
+    ],
+    [
+      "J4",
+      86.0,
+      -80.0,
+      "top",
+      0.0
+    ],
+    [
+      "J5",
+      24.35,
+      -80.0,
+      "top",
+      180.0
+    ],
+    [
+      "J6",
+      64.08,
+      -80.0,
+      "top",
+      180.0
+    ],
+    [
+      "J7",
+      98.0,
+      -64.27,
+      "top",
+      90.0
+    ],
+    [
+      "U3",
+      18.0,
+      -17.0,
+      "top",
+      0.0
+    ],
+    [
+      "U4",
+      18.0,
+      -30.0,
+      "top",
+      0.0
+    ],
+    [
+      "C1",
+      23.0,
+      -13.19,
+      "top",
+      90.0
+    ],
+    [
+      "C2",
+      23.0,
+      -26.19,
+      "top",
+      90.0
+    ],
+    [
+      "C3",
+      18.0,
+      -75.0,
+      "top",
+      0.0
+    ],
+    [
+      "R5",
+      65.0,
+      -14.0,
+      "top",
+      0.0
+    ],
+    [
+      "R6",
+      60.0,
+      -25.0,
+      "top",
+      90.0
+    ],
+    [
+      "R7",
+      60.0,
+      -29.0,
+      "top",
+      90.0
+    ],
+    [
+      "R8",
+      24.0,
+      -32.0,
+      "top",
+      90.0
+    ],
+    [
+      "R9",
+      24.0,
+      -36.0,
+      "top",
+      90.0
+    ]
+  ],
+  "audit": [
+    {
+      "ref": "ESP_L",
+      "centroid": [
+        27.84,
+        -39.129999999999995
+      ],
+      "pin1_xy": [
+        27.84,
+        -15.0
+      ],
+      "rotation": 90.0
+    },
+    {
+      "ref": "ESP_R",
+      "centroid": [
+        53.24,
+        -39.129999999999995
+      ],
+      "pin1_xy": [
+        53.24,
+        -15.0
+      ],
+      "rotation": 90.0
+    },
+    {
+      "ref": "BOB_SIG",
+      "centroid": [
+        78.0,
+        -20.0
+      ],
+      "pin1_xy": [
+        90.7,
+        -20.0
+      ],
+      "rotation": 0.0
+    },
+    {
+      "ref": "BOB_PWR",
+      "centroid": [
+        78.0,
+        -55.56
+      ],
+      "pin1_xy": [
+        90.7,
+        -55.56
+      ],
+      "rotation": 0.0
+    },
+    {
+      "ref": "J1",
+      "centroid": [
+        77.0,
+        -8.0
+      ],
+      "pin1_xy": [
+        74.46,
+        -8.0
+      ],
+      "rotation": 0.0
+    },
+    {
+      "ref": "J2",
+      "centroid": [
+        10.0,
+        -39.13
+      ],
+      "pin1_xy": [
+        10.0,
+        -30.24
+      ],
+      "rotation": 90.0
+    },
+    {
+      "ref": "J3",
+      "centroid": [
+        10.0,
+        -64.08
+      ],
+      "pin1_xy": [
+        10.0,
+        -59.0
+      ],
+      "rotation": 90.0
+    },
+    {
+      "ref": "J4",
+      "centroid": [
+        86.0,
+        -80.0
+      ],
+      "pin1_xy": [
+        83.0,
+        -80.0
+      ],
+      "rotation": 0.0
+    },
+    {
+      "ref": "J5",
+      "centroid": [
+        24.35,
+        -80.0
+      ],
+      "pin1_xy": [
+        18.0,
+        -80.0
+      ],
+      "rotation": 180.0
+    },
+    {
+      "ref": "J6",
+      "centroid": [
+        64.08,
+        -80.0
+      ],
+      "pin1_xy": [
+        59.0,
+        -80.0
+      ],
+      "rotation": 180.0
+    },
+    {
+      "ref": "J7",
+      "centroid": [
+        98.0,
+        -64.27000000000001
+      ],
+      "pin1_xy": [
+        98.0,
+        -63.0
+      ],
+      "rotation": 90.0
+    },
+    {
+      "ref": "U3",
+      "centroid": [
+        18.0,
+        -17.0
+      ],
+      "pin1_xy": [
+        15.525,
+        -13.19
+      ],
+      "rotation": 0.0
+    },
+    {
+      "ref": "U4",
+      "centroid": [
+        18.0,
+        -30.0
+      ],
+      "pin1_xy": [
+        15.525,
+        -26.19
+      ],
+      "rotation": 0.0
+    },
+    {
+      "ref": "C1",
+      "centroid": [
+        23.0,
+        -13.190000000000001
+      ],
+      "pin1_xy": [
+        23.0,
+        -14.14
+      ],
+      "rotation": 90.0
+    },
+    {
+      "ref": "C2",
+      "centroid": [
+        23.0,
+        -26.189999999999998
+      ],
+      "pin1_xy": [
+        23.0,
+        -27.14
+      ],
+      "rotation": 90.0
+    },
+    {
+      "ref": "C3",
+      "centroid": [
+        18.0,
+        -75.0
+      ],
+      "pin1_xy": [
+        17.05,
+        -75.0
+      ],
+      "rotation": 0.0
+    },
+    {
+      "ref": "R5",
+      "centroid": [
+        65.0,
+        -14.0
+      ],
+      "pin1_xy": [
+        64.0875,
+        -14.0
+      ],
+      "rotation": 0.0
+    },
+    {
+      "ref": "R6",
+      "centroid": [
+        60.0,
+        -25.0
+      ],
+      "pin1_xy": [
+        60.0,
+        -25.9125
+      ],
+      "rotation": 90.0
+    },
+    {
+      "ref": "R7",
+      "centroid": [
+        60.0,
+        -29.0
+      ],
+      "pin1_xy": [
+        60.0,
+        -29.9125
+      ],
+      "rotation": 90.0
+    },
+    {
+      "ref": "R8",
+      "centroid": [
+        24.0,
+        -32.0
+      ],
+      "pin1_xy": [
+        24.0,
+        -32.9125
+      ],
+      "rotation": 90.0
+    },
+    {
+      "ref": "R9",
+      "centroid": [
+        24.0,
+        -36.0
+      ],
+      "pin1_xy": [
+        24.0,
+        -36.9125
+      ],
+      "rotation": 90.0
+    }
+  ],
+  "board_sha256": "b3d07f6b5cc6fa43099c9944506343793dfc2212e70f236a9fdca2cc293ed53a",
+  "excluded": [
+    "H1",
+    "H2",
+    "H3",
+    "H4",
+    "R1",
+    "R2",
+    "R3",
+    "R4"
+  ],
+  "rotation_status": "Provisional; verify selected supplier model pin 1 before order. Header orientation +90 based on previous project preview. IC/JST/terminal use native angles."
+}
