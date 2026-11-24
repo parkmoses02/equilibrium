@@ -686,6 +686,9 @@ void runDiagnostics() {
 #ifdef DOUBLE_UPRIGHT
 #include "../double_pendulum/upright.h"
 #endif
+#ifdef DOUBLE_SYSID
+#include "../double_pendulum/sysid.h"
+#endif
 
 void setup() {
     digitalWrite(PIN_EN, HIGH);
@@ -711,6 +714,9 @@ void setup() {
 #ifdef DOUBLE_UPRIGHT
     doubleSetup();return;
 #endif
+#ifdef DOUBLE_SYSID
+    sysidSetup();return;
+#endif
 #ifdef CART_DISTANCE_TEST
     cartHelp();
     return;
@@ -727,6 +733,9 @@ void setup() {
 void loop() {
 #ifdef DOUBLE_UPRIGHT
     doubleLoop();return;
+#endif
+#ifdef DOUBLE_SYSID
+    sysidLoop();return;
 #endif
 #ifdef CART_DISTANCE_TEST
     cartLoop();

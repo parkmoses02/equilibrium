@@ -2,6 +2,21 @@
 // 200 mm measured for 8000 microsteps at MRES=4, in both directions.
 constexpr int CART_STEPS_MM=40;
 static_assert(CFG_MRES==4,"Recalibrate distance for different microstepping");
+constexpr float SCALE=CART_STEPS_MM*1000.f; // microsteps per metre
+static void rampLimit(float mps2,bool setDecel=false){
+    const auto units=lround(mps2*SCALE*(2199023255552.0/144000000000000.0));
+    writeRegister(REG_AMAX,units);
+    if(setDecel)writeRegister(REG_DMAX,units);
+}
+// Ramp generator velocity (commanded travel, not a measurement), m/s.
+static float rampVelocity(int32_t &raw){
+    raw=readRegister(REG_VACTUAL)&0xffffff;if(raw&0x800000)raw-=0x1000000;
+    return raw*(12000000.f/16777216.f)/SCALE;
+}
+static void commandVelocity(float v){
+    writeRegister(REG_VMAX,velocityToInternal(lroundf(fabsf(v)*SCALE)));
+    writeRegister(REG_RAMPMODE,v>=0?1:2);
+}
 static bool safeChip(uint32_t id,uint32_t drv){
     return (id>>24)==0x30 && !(id&IOIN_SD_MODE) && !(drv&(DRV_FAULT_MASK|DRV_OTPW));
 }
