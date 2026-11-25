@@ -777,7 +777,7 @@ void applyFrame(const uint8_t* f) {
 // ============================================================================
 // SHADOW camera angle estimator (added to a copy of pipeline_energy_lqr.cpp)
 // ----------------------------------------------------------------------------
-// Reads the AI-G camera packets on Serial2 (460800, GPIO32 RX / GPIO33 TX) and runs the EKF with fixed-lag
+// Reads the AI-G camera packets on Serial2 (SH_UART_BAUD, GPIO32 RX / GPIO33 TX) and runs the EKF with fixed-lag
 // delay compensation (same model/parameters as camera_estimator_test.cpp). Its output is ONLY compared with
 // the encoder: nothing here feeds the controller, the motor or the telemetry frames.
 // Key 'E' toggles a '#' status line once per second (off by default so the GUI stream is untouched; it is
@@ -789,7 +789,9 @@ void applyFrame(const uint8_t* f) {
 //   the encoder [deg], b = MEAN signed error estimator - encoder [deg] (a constant bias, e.g. a wrong upright
 //   reference, shows up here but not in the rms of a noisy signal), w = estimator rate rms error [rad/s].
 // ============================================================================
-constexpr uint32_t SH_UART_BAUD = 460800;
+// 460800 on the 40-pin header UART (/dev/ttyAMA1). 115200 when the AI-G debug-console UART (/dev/ttyAMA2) is used instead
+// (header pins 8/10 shorted to GND on 2026-11-25). It must match pend_cam --baud.
+constexpr uint32_t SH_UART_BAUD = 115200;
 constexpr int SH_PIN_RX = 32;
 constexpr int SH_PIN_TX = 33;
 constexpr size_t SH_PKT_LEN = 14;
@@ -805,7 +807,8 @@ constexpr float SH_Q_RATE = 200.0f;
 constexpr float SH_R_ANGLE = 0.017453f * 0.017453f;   // (1 deg)^2
 constexpr float SH_CAM_SIGN = -1.0f;          // camera angle sign relative to the encoder
 // (the camera zero offset is part of the calibration table in camera_angle_calib.h)
-constexpr float SH_PRE_DRIVER_MS = 6.3f;
+// 6.3 ms was measured at 460800 baud; a 14-byte packet needs 140000/baud ms on the wire, so add the difference.
+constexpr float SH_PRE_DRIVER_MS = 6.3f + (140000.0f / SH_UART_BAUD - 140000.0f / 460800.0f);
 constexpr int SH_DEFAULT_LAG = 7;
 constexpr int SH_MAX_LAG = 14;
 constexpr int SH_HIST = 24;
