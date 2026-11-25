@@ -1,5 +1,7 @@
 # AI-G 카메라 실행
 
+Windows PC에서는 [Windows용 실행 방법](AI-G_run_windows.md)을 따른다. 아래 PC 명령은 Linux용이다.
+
 ## 1. 연결
 
 **PC ↔ AI-G (이더넷)**

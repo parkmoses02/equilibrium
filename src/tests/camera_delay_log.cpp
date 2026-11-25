@@ -10,12 +10,13 @@
 // Camera packet (14 bytes): layout in CLAUDE.md section 5 (same parser as camera_estimator_test.cpp).
 
 #include <Arduino.h>
+#include <CameraUartBaud.h>
 
 constexpr uint8_t PIN_ENCODER_A = 34;
 constexpr uint8_t PIN_ENCODER_B = 35;
 constexpr int PIN_UART_RX = 32;  // AI-G TX -> ESP32 GPIO32
 constexpr int PIN_UART_TX = 33;  // ESP32 GPIO33 -> AI-G RX (unused here)
-constexpr uint32_t UART_BAUD = 460800;
+constexpr uint32_t UART_BAUD = AIG_CAMERA_UART_BAUD;
 constexpr size_t PKT_LEN = 14;
 constexpr uint32_t ENCODER_PERIOD_US = 2000;
 constexpr uint32_t STATUS_US = 1000000;

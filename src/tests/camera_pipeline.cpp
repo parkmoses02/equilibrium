@@ -1,4 +1,5 @@
 #include <Arduino.h>
+#include <CameraUartBaud.h>
 #include <SPI.h>
 #include <math.h>
 #include <MyData.h>
@@ -613,7 +614,7 @@ void applyFrame(const uint8_t* f) {
 //   the encoder [deg], b = MEAN signed error estimator - encoder [deg] (a constant bias, e.g. a wrong upright
 //   reference, shows up here but not in the rms of a noisy signal), w = estimator rate rms error [rad/s].
 // ============================================================================
-constexpr uint32_t SH_UART_BAUD = 460800;
+constexpr uint32_t SH_UART_BAUD = AIG_CAMERA_UART_BAUD;
 constexpr int SH_PIN_RX = 32;
 constexpr int SH_PIN_TX = 33;
 constexpr size_t SH_PKT_LEN = 14;

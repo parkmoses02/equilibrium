@@ -15,6 +15,7 @@
 //   C,<rx_us>,<frame>,<angle i16 0.01deg>,<flags>,<age 0.1ms>,<cart x u16 0.1px>   per camera packet
 
 #include <Arduino.h>
+#include <CameraUartBaud.h>
 #include <SPI.h>
 #include <math.h>
 #include <MyData.h>
@@ -32,7 +33,7 @@ constexpr uint8_t PIN_SPI_MISO = 19;
 constexpr uint8_t PIN_SPI_MOSI = 23;
 constexpr uint8_t PIN_SPI_SCK  = 18;
 
-constexpr uint32_t UART_BAUD = 460800;
+constexpr uint32_t UART_BAUD = AIG_CAMERA_UART_BAUD;
 constexpr size_t PKT_LEN = 14;
 constexpr int32_t ENCODER_COUNTS_PER_REV = 2400;
 constexpr float STEPS_PER_METRE = (200.0f * 16.0f) / 0.040f; // 80,000 steps/m

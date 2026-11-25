@@ -20,9 +20,7 @@ import os
 import re
 import select
 import sys
-import termios
 import time
-import tty
 
 TEXT = re.compile(rb"(?:# SH[^\r\n]*|# cart[^\r\n]*|# REC[^\r\n]*|OK:[^\r\n]*|ARMED[^\r\n]*|DISARMED[^\r\n]*|CATCH[^\r\n]*|[A-Z ]*REFUSED[^\r\n]*|===[^\r\n]*)")
 
@@ -52,6 +50,9 @@ def stalled(now, last_rx, last_warn, limit=STALL_S):
 
 
 def main():
+    import termios
+    import tty
+
     if len(sys.argv) < 2:
         print(__doc__)
         return 1

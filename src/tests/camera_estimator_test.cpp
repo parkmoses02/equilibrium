@@ -15,6 +15,7 @@
 // Camera packet (14 bytes): layout in CLAUDE.md section 5. The other camera firmwares copy this parser.
 
 #include <Arduino.h>
+#include <CameraUartBaud.h>
 #include <math.h>
 #include "camera_angle_calib.h"
 
@@ -22,7 +23,7 @@ constexpr uint8_t PIN_ENCODER_A = 34;
 constexpr uint8_t PIN_ENCODER_B = 35;
 constexpr int PIN_UART_RX = 32;  // AI-G TX -> ESP32 GPIO32
 constexpr int PIN_UART_TX = 33;  // ESP32 GPIO33 -> AI-G RX (unused)
-constexpr uint32_t UART_BAUD = 460800;
+constexpr uint32_t UART_BAUD = AIG_CAMERA_UART_BAUD;
 constexpr size_t PKT_LEN = 14;
 constexpr int32_t ENCODER_COUNTS_PER_REV = 2400;
 constexpr float RAD_PER_COUNT = 2.0f * PI / ENCODER_COUNTS_PER_REV;
