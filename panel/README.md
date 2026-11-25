@@ -1,5 +1,28 @@
 # Pendulum Panel (PC)
 
+## 이중진자 운전 화면 (double_upright)
+
+이 폴더의 펌웨어를 PlatformIO 환경 **double_upright → Upload**로 올린 뒤 Monitor를 닫는다.
+PC는 Python 3와 Tkinter, pyserial(`python -m pip install pyserial`)이 필요하다.
+저장소 루트의 **DoublePanel.pyw**를 더블클릭하거나 `python -m panel.double_console`로 실행한다.
+기존 단진자 프로그램과 이중진자 로그 뷰어는 그대로 사용할 수 있지만 USB 포트는 한 프로그램만 연다.
+
+1. COM 포트를 선택하고 연결한다. 이전 펌웨어처럼 DP1이 없는 장치에서는 자세 버튼이 잠긴다.
+2. 카트를 물리적으로 중앙에 놓고 두 링크를 DD로 정지시킨 후 **중앙 DD 영점**을 누른다.
+3. 목표 DD / DU / UD / UU 중 하나를 누른다. 모터 OFF의 DD 출발은 두 글자(rq/rw/re),
+   유지 중 또는 모터 ON의 DD 대기는 한 글자다. 궤적 선택, 출발 허가, 포착, 레일 보호는 펌웨어가 결정한다.
+   보드가 출발 대기/전환 중이면 새 목표를 예약하지 않는다. 거절·정지 사유는 화면 아래에서 확인한다.
+4. DD는 하강 후 모터 ON 대기다. **즉시 출력 OFF**(!)는 하강 없이 출력을 끄므로 진자가 떨어질 수 있다.
+   소프트웨어 정지는 USB 통신이 필요하며 물리 비상 정지를 대체하지 않는다. 연결 해제는 정지 명령이 아니다.
+   끊기면 장치 상태를 직접 확인한다. 재연결 시 이전 명령은 전송하지 않는다.
+
+각도는 수직 위가 0°인 **두 절대각**이다. 카트 위치·속도는 TMC5160 내부 램프 추정값이며
+가속도는 실측값이 아닌 제한 후 가속도 명령(속도 제한 전)이다. 제어 중 각속도는 EKF 추정값이다.
+수신 원문(기존 POSE, 종료 CSV, 정지 코드 포함)은 저장소의 logs/double_panel_*.log에 저장한다.
+DP1 형식: 장치시각(µs), 상태, 출발키, 목표키, x(m), base/tip(rad), base/tip 각속도(rad/s),
+램프 속도(m/s), 제한 후 가속도(m/s²). 활성 약 20 Hz, 비활성 약 10 Hz; TX 여유가 없으면 생략.
+미보정 상태의 수치와 비활성 상태의 속도·가속도 필드는 유효하지 않다.
+
 Lightweight Python panel to interact with the ESP pendulum firmware.
 
 Requirements

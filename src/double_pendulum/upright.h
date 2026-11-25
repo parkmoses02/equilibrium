@@ -252,6 +252,16 @@ static void subtractTargetAngles(float &base,float &tip){
     tip=remainderf(tip-mode->tip,2*PI);
 }
 static bool poseOK(float t){return fabsf(t)<=ARM_TILT;}
+// DP1 is an independent, disposable snapshot. A dropped frame needs no replay.
+// Only write a complete line when it fits; never wait for the UART in control.
+static void panelSample(uint32_t now,const char *state,char from,char to,float x,
+                        float base,float tip,float wb,float wt,float v,float a){
+    char buf[124];
+    int n=snprintf(buf,sizeof(buf),"DP1,%lu,%s,%c,%c,%.4f,%.5f,%.5f,%.3f,%.3f,%.4f,%.3f\n",
+        (unsigned long)now,state,from,to,x,base,tip,wb,wt,v,a);
+    if(n>0 && n<(int)sizeof(buf) && Serial.availableForWrite()>=n)
+        Serial.write(reinterpret_cast<const uint8_t*>(buf),n);
+}
 // Inputs are wrapped errors from UD (base up, tip down) and filtered absolute rates.
 static bool udCatchReady(float base, float tip, float baseRate, float tipRate, float cartSpeed){
     return fabsf(base) <= UD_CATCH_ANGLE_RAD && fabsf(tip) <= UD_CATCH_ANGLE_RAD
@@ -345,7 +355,7 @@ static void idleCommand(char c,char dest){
             if(fabsf(x)>CART_TRAVEL_LIMIT_M){
                 stopDouble("RAMP_POSITION_LIMIT","BLOCK: ramp position", -1.f, "x_from_z_mm=%+.2f limit_mm=300\n", x*1000.f);return;
             }
-            while(Serial.available()){if(Serial.read()=='x'){stopDouble("MANUAL_STOP","OFF during preflight");return;}}
+            while(Serial.available()){int key=Serial.read();if(key=='x'||key=='!'){stopDouble("MANUAL_STOP","OFF during preflight");return;}}
             if(enc[0].bad!=errors[0] || enc[1].bad!=errors[1]){stopDouble("ENCODER_EDGES_PREFLIGHT","OFF: encoder error; reference cleared.");return;}
             if(!startPoseOK(dd))return;
             if(dd && (labs(enc[0].pos-before[0])>3 || labs(enc[1].pos-before[1])>3)){
@@ -387,6 +397,7 @@ static void doubleLoop(){
     static char cmd[2];static unsigned len=0;static bool discard=false;
     if(Serial.available()){
         char ch=Serial.read();
+        if(ch=='!'){len=0;discard=true;stopDouble("MANUAL_STOP","OFF: immediate disable");return;}
         if(ch=='x'){
             len=0;discard=true;
             // First x during a UU/UD/DU hold: soft stop (the control frame starts the descent).
@@ -438,7 +449,20 @@ static void doubleLoop(){
         }
     }
     uint32_t now=micros(),us=now-tick;
-    if(!active)return;
+    if(!active){
+        static uint32_t idleSample;
+        if(now-idleSample>=100000u){
+            idleSample=now;
+            float x=0,b=0,t=0;
+            const char *state="ZERO";
+            if(referenced){
+                absoluteAngles(readEncoderFrame(),b,t);x=rampPositionFromZero();
+                state=poseOK(remainderf(b-PI,2*PI)) && poseOK(remainderf(t-PI,2*PI))?"READY":"OFF";
+            }
+            panelSample(now,state,state[0]=='R'?'r':'-','-',x,b,t,0,0,0,0);
+        }
+        return;
+    }
     if(us>20000){
         stopDouble("LOOP_DEADLINE","OFF: loop deadline", -1.f, "Loop interval: %lu us\n", (unsigned long)us);
         return;
@@ -467,6 +491,8 @@ static void doubleLoop(){
             stopDouble(vr==0?"RAIL_BRAKE":"RAIL_BRAKE_TIMEOUT","OFF: rail braking", -1.f,
                        "brake_x_mm=%+.2f brake_v_m_s=%+.4f final_x_mm=%+.2f final_v_m_s=%+.4f\n",
                        brakeX*1000.f,brakeV,x*1000.f,v);
+        }else if(now==brakeStart){
+            panelSample(now,"BRAKE",'-','-',x,kf.s[0],kf.s[1],w1,w2,v,0);
         }
         return;
     }
@@ -736,6 +762,17 @@ static void doubleLoop(){
         float base=t1,tip=t2;
         if(!swinging){base=remainderf(base+mode->base,2*PI);tip=remainderf(tip+mode->tip,2*PI);}
         Serial.printf("POSE,%lu,%c,%.5f,%.5f,%.5f\n",(unsigned long)now,swinging?plan->phase:mode->key,x,base,tip);
+    }
+    // Stagger DP1 and legacy POSE so each can fit the ESP32 UART FIFO.
+    static uint32_t lastPanel;
+    if(now-lastPanel>=45000u && now-lastPose>=20000u){
+        lastPanel=now;
+        const char *state=swinging?"SWING":softStopping||softStopRequested?"DAMP":
+            (armedPlan||ddSwingDest)?"ARM":ddWait?"WAIT":"HOLD";
+        char from=swinging?char(plan->csv[0]-'A'+'a'):mode->key;
+        char to=swinging?mode->key:ddSwingDest?ddSwingDest:armedPlan?armedDest:'-';
+        panelSample(now,state,from,to,x,remainderf(kf.s[0],2*PI),remainderf(kf.s[1],2*PI),
+                    w1,w2,v,aLimited);
     }
     if(startTransition){
         // The transition begins next frame at step 0; switching only after this frame's
