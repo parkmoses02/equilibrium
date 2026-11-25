@@ -907,6 +907,7 @@ static uint8_t shCrc8(const uint8_t* d, size_t n) {
 static uint8_t shBuf[SH_PKT_LEN];
 static size_t shBufLen = 0;
 static uint32_t shPktOk, shPktValid;
+static uint32_t shRxBytes, shCrcFail;   // diagnostics: bytes seen on Serial2, packets that failed the CRC
 static bool shPendingValid = false;
 static float shPendingZ = 0.0f;
 static int shPendingLag = SH_DEFAULT_LAG;
@@ -944,6 +945,7 @@ static void shHandlePacket() {
 static void shPollRx() {
     while (Serial2.available()) {
         const uint8_t b = (uint8_t)Serial2.read();
+        shRxBytes++;
         shBuf[shBufLen++] = b;
         while (shBufLen >= 1 && shBuf[0] != 0xAA) shDropFirstByte();
         if (shBufLen >= 2 && shBuf[1] != 0x55) { shDropFirstByte(); continue; }
@@ -952,6 +954,7 @@ static void shPollRx() {
                 shHandlePacket();
                 shBufLen = 0;
             } else {
+                shCrcFail++;
                 shDropFirstByte();
                 while (shBufLen >= 1 && shBuf[0] != 0xAA) shDropFirstByte();
                 if (shBufLen >= 2 && shBuf[1] != 0x55) shDropFirstByte();
@@ -1040,6 +1043,11 @@ static void shReport() {
                 mean(shCtr.esum, shCtr.n) * d, (unsigned long)shCtr.n,
                 shTicks ? (unsigned long)(shTickSumUs / shTicks) : 0UL, (unsigned long)shTickMaxUs, (unsigned long)shPktValid, (unsigned long)shRejects);
             // snprintf reports the length it WOULD have written: never read past the buffer
+            if (shPktValid == 0) {       // no valid angle this second: say whether bytes/packets arrive at all
+                const int dn = snprintf(line + len, sizeof(line) - len, " p%lu c%lu B%lu",
+                                        (unsigned long)shPktOk, (unsigned long)shCrcFail, (unsigned long)shRxBytes);
+                if (dn > 0) len += dn;
+            }
             if (len > 126) len = 126;    // longer than the 128-byte FIFO could ever take: cut it (keeps room for the newline)
             // cart position (counted m) at the end of the line if it still fits the 128-byte FIFO, then the newline
             const int xn = snprintf(line + len, sizeof(line) - len, " x%+.3f", (double)cartPosition);
@@ -1065,6 +1073,7 @@ static void shReport() {
     shCtr = ShStat();
     shTickSumUs = shTickMaxUs = shTicks = 0;
     shPktOk = shPktValid = 0;
+    shRxBytes = shCrcFail = 0;
     shRejects = 0;
 }
 
