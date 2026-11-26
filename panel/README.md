@@ -76,7 +76,7 @@ This is a minimal starter panel. Extend controls to send specific parameters (ad
 ## Rev.L 이중진자 실시간 표시 (읽기 전용)
 
 1. PlatformIO `double_upright`에서 Upload and Monitor를 실행한다. Monitor가 출력하는 로그 경로를 확인한다.
-2. 저장소 루트의 별도 터미널에서 `python panel/live_pose.py`를 실행한다 (Tkinter 필요). 자동 선택이 안 되면 로그 경로를 인자로 지정한다. Monitor를 다시 시작해 로그가 바뀌면 뷰어도 다시 실행한다.
+2. VS Code에서 저장소 루트를 연 뒤 **터미널 → 작업 실행… (Run Task…) → Live pose 열기**를 선택한다. Python 3과 Tkinter가 필요하다(Windows는 `python`, macOS·Linux는 `python3`). 뷰어가 가장 최근 Monitor 로그를 연다. Monitor를 다시 시작하면 뷰어를 닫고 같은 작업을 다시 실행한다.
 3. 기존 제어 명령은 **PlatformIO Monitor에서만** 입력한다. 뷰어는 COM 포트를 열지 않는다. 동작 중 약 20 Hz로 실제 두 절대각과 램프 기반 카트 **추정** 위치를 그린다. 정지/통신 중단 시 마지막 자세를 고정한다.
 
 ## DD에서 UD로 스윙업

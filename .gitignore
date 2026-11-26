@@ -12,3 +12,5 @@ src/tests/logs/
 .history/
 *.kicad_prl
 __pycache__/
+
+/.venv_windows/

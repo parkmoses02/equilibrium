@@ -189,19 +189,21 @@ static TraceRow rows[TRACE_US/5000+1];
 static unsigned used;
 static uint32_t traceStart;
 static void dumpTrace(){
+    if(!used)return;
     Serial.println("elapsed_us,dt_us,base_error_deg,tip_error_deg,ramp_x_mm,ramp_v_mm_s,lqr_u_m_s2,limited_a_m_s2,v_cmd_mm_s,speed_clipped,estimated_heds");
     for(unsigned i=0;i<used;i++){
         const auto &r=rows[i];
         Serial.printf("%lu,%lu,%.3f,%.3f,%.3f,%.3f,%.4f,%.4f,%.3f,%d,%u\n",
             (unsigned long)r.t,(unsigned long)r.dt,degrees(r.base),degrees(r.tip),r.x*1000,r.v*1000,r.u,r.a,r.vc*1000,r.speedLimited,unsigned(r.estimatedHeds));
     }
+    used=0;
 }
 #endif
 static void reportEdges(const char *checkedAt){
     Serial.printf("ENC checked_at=%s invalid_since_z HEDS1=+%u HEDS2=+%u raw=%ld,%ld\n",
         checkedAt,enc[0].bad-errors[0],enc[1].bad-errors[1],(long)enc[0].pos,(long)enc[1].pos);
 }
-static void stopAndDump(float missScore=-1.f){
+static void stopMotion(float missScore=-1.f){
     digitalWrite(PIN_EN,HIGH);writeRegister(REG_VMAX,0);writeRegister(REG_RAMPMODE,1);
     bool wasActive=active;
     bool wasSwing=swinging;
@@ -222,15 +224,11 @@ static void stopAndDump(float missScore=-1.f){
             reLearn.abort();Serial.println("RE_LEARN skipped; using last accepted profile.");
         }
     }
-    dumpSwing();
-#ifdef UPRIGHT_TRACE
-    if(wasActive)dumpTrace();
-#endif
 }
 template<typename... Args>
 static void stopDouble(const char *code, const char *why, float missScore=-1.f,
                        const char *detailFormat=nullptr, Args... detailArgs){
-    stopAndDump(missScore);
+    stopMotion(missScore);
     if(detailFormat) Serial.printf(detailFormat, detailArgs...);
     if(why) Serial.println(why);
     if(caughtFrame){
@@ -312,13 +310,26 @@ static void doubleSetup(){
     Serial.println("x during a UU/UD/DU hold = soft stop: descend to DD, damp, then OFF. x again (or x in a swing) = OFF now.");
     Serial.println("r during a UU/UD/DU hold = descend to DD and wait with the motor on; then q/w/e swings up again.");
     Serial.println("z saves DD angles and cart ramp origin; h reads encoder counters; lc clears RE learning. Motor OFF commands.");
+    Serial.println("k prints the last recorded motion CSV once, after STOP_CODE and before starting again.");
 #ifdef UPRIGHT_TRACE
-    Serial.printf("TRACE: hold for up to %lu ms after p or catch, then OFF and CSV. Ramp x/v are NOT measured travel.\n",(unsigned long)(TRACE_US/1000));
+    Serial.printf("TRACE: hold for up to %lu ms after p or catch, then OFF. Enter k for CSV. Ramp x/v are NOT measured travel.\n",(unsigned long)(TRACE_US/1000));
 #endif
 }
 static void idleCommand(char c,char dest){
         if(c=='l' && dest=='c'){reLearn=ReLearning{};Serial.println("RE learning cleared; angle zero unchanged.");return;}
         if(c=='h' && !dest){reportEdges("motor_off");return;}
+        if(c=='k' && !dest){
+            bool hasData=swingUsed!=0;
+#ifdef UPRIGHT_TRACE
+            hasData=hasData || used!=0;
+#endif
+            if(!hasData){Serial.println("No motion CSV available.");return;}
+            dumpSwing();
+#ifdef UPRIGHT_TRACE
+            dumpTrace();
+#endif
+            return;
+        }
         bool dd=false;
         const auto *from=poseFor(c);
         if(dest){
@@ -376,6 +387,7 @@ static void idleCommand(char c,char dest){
                 swingStep=0;
                 if(plan==&ddToDU)reLearn.begin();
             }
+            swingUsed=0;
             swinging=dd;
             holdTiltLimitRad = MANUAL_HOLD_TILT_RAD;
             kf.reset(prev1,prev2);kfPrimed=false; // absolute angles from startPoseOK
