@@ -1,0 +1,208 @@
+--- C:/Users/tjdgu/AppData/Local/Temp/claude/0f8108b195956993/21b33cc9-af53-40fb-a1db-3ade14c8eaf8/scratchpad/pend_cam.orig.c	2026-11-26 23:24:50.687052600 +0900
++++ aig/pend_cam.c	2026-11-26 23:25:54.525623700 +0900
+@@ -28,6 +28,14 @@
+  *   [13] CRC-8 (poly 0x07, init 0) over bytes [2..12]
+  *
+  * Angle: 0 deg = rod straight up (after --vflip), + = leaning to the right of the image.
++ *
++ * Optional display stream (does not touch the UART path):
++ *   ./pend_cam --vflip --uart ... --stream 5000 --stream-div 6
++ *   Listens on TCP port 5000. When a client (the laptop viewer) is connected, every --stream-div-th frame
++ *   is copied and sent from a separate thread: [StreamHdr, 68 bytes][raw UYVY, stride*H bytes]. If the
++ *   laptop or the network is slower than the stream, frames are skipped; the capture/UART loop never waits.
++ *   With no client connected nothing is copied. Needs -pthread when building:
++ *   aarch64-linux-gnu-gcc -O2 -static -pthread -o pend_cam pend_cam.c -lm
+  */
+ #define _GNU_SOURCE
+ #include <stdio.h>
+@@ -42,6 +50,10 @@
+ #include <poll.h>
+ #include <signal.h>
+ #include <termios.h>
++#include <pthread.h>
++#include <sys/socket.h>
++#include <netinet/in.h>
++#include <netinet/tcp.h>
+ #include <sys/ioctl.h>
+ #include <sys/mman.h>
+ #include <linux/videodev2.h>
+@@ -423,6 +435,122 @@
+     return write(ufd, b, PKT_LEN) == PKT_LEN ? 0 : -1;
+ }
+ 
++/* ---------- optional raw-frame stream to a laptop (display only, never blocks the control path) ---------- */
++#define STREAM_MAGIC 0x31464350u   /* bytes 'P','C','F','1' on the wire (little-endian) */
++
++typedef struct __attribute__((packed)) {
++    uint32_t magic, seq;
++    uint64_t ts_us;              /* driver frame timestamp in us (0 if unavailable) */
++    uint16_t w, h;
++    uint32_t stride, payload;    /* payload = stride * h bytes of raw UYVY follow the header */
++    uint16_t flags;              /* b0: --vflip is active; the viewer flips the image and the blobs the same way */
++    uint16_t rflags;             /* Rec.flags of the on-board tracker (b0 calibrating, b1 no pivot, b2 tip, b3 mid) */
++    float px, py, tx, ty, mx, my, ang;   /* on-board result (NaN = none); y already flipped like the UART packet */
++    float proc_ms, lat_ms;
++} StreamHdr;                     /* 68 bytes */
++
++typedef struct {
++    int lfd, cfd;                /* listening / client socket */
++    volatile int connected, stop;
++    int full;                    /* slot holds a frame that the sender thread has not finished sending (under mu) */
++    pthread_t th;
++    pthread_mutex_t mu; pthread_cond_t cv;
++    StreamHdr hdr; uint8_t *buf;
++    int div, tick;
++    unsigned long sent, skipped, copies; double copy_ms;
++} Stream;
++
++static int send_all(int fd, const void *p, size_t n) {
++    const uint8_t *b = p;
++    while (n) {
++        ssize_t k = send(fd, b, n, MSG_NOSIGNAL);
++        if (k < 0) { if (errno == EINTR) continue; return -1; }
++        if (k == 0) return -1;
++        b += k; n -= (size_t)k;
++    }
++    return 0;
++}
++
++static void *stream_thread(void *arg) {
++    Stream *s = (Stream *)arg;
++    while (!s->stop) {
++        if (s->cfd < 0) {                         /* wait for the viewer */
++            struct pollfd p = { s->lfd, POLLIN, 0 };
++            if (poll(&p, 1, 200) > 0) {
++                int fd = accept(s->lfd, NULL, NULL);
++                if (fd >= 0) {
++                    int one = 1, sb = 4 << 20;
++                    setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, &one, sizeof one);
++                    setsockopt(fd, SOL_SOCKET, SO_SNDBUF, &sb, sizeof sb);
++                    s->cfd = fd; s->connected = 1;
++                    fprintf(stderr, "stream: viewer connected\n");
++                }
++            }
++            continue;
++        }
++        pthread_mutex_lock(&s->mu);
++        while (!s->full && !s->stop) pthread_cond_wait(&s->cv, &s->mu);
++        pthread_mutex_unlock(&s->mu);
++        if (s->stop) break;
++        if (send_all(s->cfd, &s->hdr, sizeof s->hdr) < 0 || send_all(s->cfd, s->buf, s->hdr.payload) < 0) {
++            close(s->cfd); s->cfd = -1; s->connected = 0;
++            fprintf(stderr, "stream: viewer disconnected\n");
++        } else s->sent++;
++        pthread_mutex_lock(&s->mu); s->full = 0; pthread_mutex_unlock(&s->mu);
++    }
++    return NULL;
++}
++
++static Stream *stream_open(int port, int div, size_t frame_bytes) {
++    Stream *s = calloc(1, sizeof(*s));
++    if (!s) return NULL;
++    s->cfd = -1; s->div = div < 1 ? 1 : div;
++    s->buf = malloc(frame_bytes);
++    s->lfd = socket(AF_INET, SOCK_STREAM, 0);
++    if (!s->buf || s->lfd < 0) { perror("stream socket"); return NULL; }
++    int one = 1; setsockopt(s->lfd, SOL_SOCKET, SO_REUSEADDR, &one, sizeof one);
++    struct sockaddr_in a; memset(&a, 0, sizeof a);
++    a.sin_family = AF_INET; a.sin_addr.s_addr = htonl(INADDR_ANY); a.sin_port = htons((uint16_t)port);
++    if (bind(s->lfd, (struct sockaddr *)&a, sizeof a) < 0 || listen(s->lfd, 1) < 0) { perror("stream bind/listen"); return NULL; }
++    pthread_mutex_init(&s->mu, NULL); pthread_cond_init(&s->cv, NULL);
++    if (pthread_create(&s->th, NULL, stream_thread, s) != 0) { perror("stream thread"); return NULL; }
++    fprintf(stderr, "stream: listening on TCP port %d, every %d-th frame (%zu bytes each) once a viewer connects\n",
++            port, s->div, frame_bytes);
++    return s;
++}
++
++/* Called from the capture loop AFTER the UART packet went out and BEFORE the buffer is re-queued.
++ * Copies the frame only when a viewer is connected, the sender is idle and it is this frame's turn. */
++static void stream_offer(Stream *s, const uint8_t *img, int W, int H, int stride, const Rec *r,
++                         double ts_s, int vflip) {
++    if (!s || !s->connected) return;
++    if (++s->tick < s->div) return;
++    s->tick = 0;
++    pthread_mutex_lock(&s->mu); int full = s->full; pthread_mutex_unlock(&s->mu);
++    if (full) { s->skipped++; return; }
++    double t0 = now_s();
++    memcpy(s->buf, img, (size_t)stride * H);
++    StreamHdr *h = &s->hdr;
++    h->magic = STREAM_MAGIC; h->seq = r->seq; h->ts_us = ts_s > 0 ? (uint64_t)(ts_s * 1e6) : 0;
++    h->w = (uint16_t)W; h->h = (uint16_t)H; h->stride = (uint32_t)stride; h->payload = (uint32_t)((size_t)stride * H);
++    h->flags = vflip ? 1 : 0; h->rflags = (uint16_t)r->flags;
++    h->px = (float)r->px; h->py = (float)r->py; h->tx = (float)r->tx; h->ty = (float)r->ty;
++    h->mx = (float)r->mx; h->my = (float)r->my; h->ang = (float)r->ang;
++    h->proc_ms = (float)r->proc_ms; h->lat_ms = (float)r->lat_ms;
++    pthread_mutex_lock(&s->mu); s->full = 1; pthread_cond_signal(&s->cv); pthread_mutex_unlock(&s->mu);
++    s->copy_ms += (now_s() - t0) * 1e3; s->copies++;
++}
++
++static void stream_close(Stream *s) {
++    if (!s) return;
++    s->stop = 1;
++    pthread_mutex_lock(&s->mu); pthread_cond_signal(&s->cv); pthread_mutex_unlock(&s->mu);
++    if (s->cfd >= 0) shutdown(s->cfd, SHUT_RDWR);
++    pthread_join(s->th, NULL);
++    if (s->cfd >= 0) close(s->cfd);
++    close(s->lfd);
++}
++
+ /* ---------- main ---------- */
+ static void nanstr(FILE *f, double v, const char *fmt) { if (isnan(v)) fputc(',', f); else { fputc(',', f); fprintf(f, fmt, v); } }
+ 
+@@ -432,6 +560,7 @@
+     const char *dev = "/dev/video2", *out = "/dev/shm/track.csv", *file = NULL, *dump = NULL;
+     int W = 632, H = 464, frames = 900, dump_n = 3; double fps = 90;
+     const char *uartdev = NULL; int baud = 460800, pace = 0, ufd = -1;
++    int stream_port = 0, stream_div = 6; Stream *strm = NULL;
+     unsigned long uart_pkts = 0, uart_err = 0;
+     Ctx c; memset(&c, 0, sizeof(c));
+     c.r_vmin = 148; c.r_umax = 130; c.r_diff = 30;
+@@ -453,6 +582,8 @@
+         else if (ARG("--dump-count")) dump_n = atoi(NEXT());
+         else if (ARG("--uart")) uartdev = NEXT();
+         else if (ARG("--baud")) baud = atoi(NEXT());
++        else if (ARG("--stream")) stream_port = atoi(NEXT());          /* TCP port of the laptop viewer stream */
++        else if (ARG("--stream-div")) stream_div = atoi(NEXT());       /* send every N-th frame (default 6 = 15 fps) */
+         else if (ARG("--pace")) pace = 1;   /* file mode: replay at --fps instead of as fast as possible */
+         else if (ARG("--red")) sscanf(NEXT(), "%d,%d,%d", &c.r_vmin, &c.r_umax, &c.r_diff);
+         else if (ARG("--blue")) sscanf(NEXT(), "%d,%d,%d", &c.b_umin, &c.b_vmax, &c.b_diff);
+@@ -470,6 +601,7 @@
+     }
+ 
+     signal(SIGINT, on_sig); signal(SIGTERM, on_sig);
++    signal(SIGPIPE, SIG_IGN);   /* a viewer that disconnects must not kill the tracker */
+ 
+     Cam cam; memset(&cam, 0, sizeof(cam)); cam.fd = -1;
+     FILE *fin = NULL;
+@@ -500,6 +632,11 @@
+                 uartdev, baud, PKT_LEN, PKT_LEN * 10.0 * 1000.0 / baud);
+     }
+ 
++    if (stream_port > 0) {
++        strm = stream_open(stream_port, stream_div, (size_t)c.stride * H);
++        if (!strm) return 1;
++    }
++
+     int n = 0, dropped = 0, nodet = 0; unsigned prev_seq = 0; int have_prev = 0;
+     double t0 = -1, wall0 = now_s();
+     while (n < frames && !g_stop) {
+@@ -531,6 +668,7 @@
+         if (ufd >= 0) {
+             if (send_pkt(ufd, r, mono ? (now_s() - ts) * 1e3 : 0, mono) == 0) uart_pkts++; else uart_err++;
+         }
++        stream_offer(strm, img, W, H, c.stride, r, ts, c.vflip);   /* after the UART packet: never delays it */
+         if (!file) {
+             if (have_prev && seq != prev_seq + 1) dropped += (int)(seq - prev_seq - 1);
+             prev_seq = seq; have_prev = 1;
+@@ -539,6 +677,11 @@
+         n++;
+     }
+     double wall = now_s() - wall0;
++    if (strm) {
++        fprintf(stderr, "stream: sent %lu frames, skipped %lu (sender busy), frame copy mean %.2f ms\n",
++                strm->sent, strm->skipped, strm->copies ? strm->copy_ms / strm->copies : 0.0);
++        stream_close(strm);
++    }
+     if (fd) fclose(fd);
+     if (!file && cam.fd >= 0) { int t = cam.type; xioctl(cam.fd, VIDIOC_STREAMOFF, &t); }
+ 
